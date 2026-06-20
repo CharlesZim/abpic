@@ -37,6 +37,7 @@ export default function Home() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resultId, setResultId] = useState<string | null>(null)
+  const [resultsToken, setResultsToken] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
   function addSeries() {
@@ -128,6 +129,7 @@ export default function Home() {
         throw new Error(data?.error || `Request failed (${res.status})`)
       }
       setResultId(data.id)
+      setResultsToken(data.resultsToken)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
@@ -138,7 +140,7 @@ export default function Home() {
   if (resultId) {
     const origin = typeof window !== 'undefined' ? window.location.origin : ''
     const shareLink = `${origin}/v/${resultId}`
-    const resultsLink = `${origin}/r/${resultId}`
+    const resultsLink = `${origin}/r/${resultsToken}`
 
     async function copy(key: string, value: string) {
       await navigator.clipboard.writeText(value)
@@ -192,6 +194,7 @@ export default function Home() {
           type="button"
           onClick={() => {
             setResultId(null)
+            setResultsToken(null)
             setSeries([emptySeries()])
           }}
           className="text-sm text-zinc-500 underline"

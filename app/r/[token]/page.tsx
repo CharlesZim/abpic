@@ -12,9 +12,9 @@ function isExpired(expiresAt: string): boolean {
 function NotFound() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col items-center justify-center gap-3 p-6 text-center">
-      <h1 className="text-2xl font-bold">Test not found</h1>
+      <h1 className="text-2xl font-bold">Results not found</h1>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        We couldn&apos;t find results for this link.
+        This results link is invalid.
       </p>
     </main>
   )
@@ -23,15 +23,16 @@ function NotFound() {
 export default async function ResultsPage({
   params,
 }: {
-  params: Promise<{ id: string }>
+  params: Promise<{ token: string }>
 }) {
-  const { id } = await params
+  const { token } = await params
 
   const supabase = getSupabaseAdmin()
+  // Results are gated by a separate secret token, not the public voting id.
   const { data: test } = await supabase
     .from('tests')
     .select('id, series, expires_at')
-    .eq('id', id)
+    .eq('results_token', token)
     .maybeSingle()
 
   if (!test) {
@@ -44,7 +45,7 @@ export default async function ResultsPage({
   const { data: votes } = await supabase
     .from('votes')
     .select('series_id, image_index')
-    .eq('test_id', id)
+    .eq('test_id', test.id)
 
   // Tally votes per series -> per image index.
   const tally = new Map<string, number[]>()

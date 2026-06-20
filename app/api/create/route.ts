@@ -14,13 +14,56 @@ const DURATION_HOURS: Record<string, number> = {
 
 const PHOTOS_BUCKET = 'photos'
 
-function extFor(file: File): string {
-  const fromName = file.name.split('.').pop()?.toLowerCase()
-  if (fromName && fromName.length <= 5) return fromName
-  const subtype = file.type.split('/')[1]?.toLowerCase()
-  if (subtype === 'jpeg') return 'jpg'
-  return subtype || 'jpg'
+const MAX_SERIES = 5
+const MAX_PHOTOS_PER_SERIES = 5
+const MIN_PHOTOS_PER_SERIES = 2
+const MAX_FILE_BYTES = 8 * 1024 * 1024 // 8 MB per photo
+const MAX_TOTAL_BYTES = 40 * 1024 * 1024 // 40 MB per request
+
+// Allowlist of image types we accept, mapped to their canonical extension.
+// SVG is intentionally excluded (it can carry script).
+const ALLOWED_TYPES: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
 }
+
+// Detect the real image type from magic bytes, ignoring the client-supplied
+// MIME (which is untrusted). Returns null for anything not on the allowlist.
+function sniffImageType(bytes: Uint8Array): string | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg'
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    return 'image/png'
+  }
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+    return 'image/gif'
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return 'image/webp'
+  }
+  return null
+}
+
+type ValidatedFile = { file: File; mime: string; ext: string }
 
 export async function POST(request: Request) {
   let formData: FormData
@@ -43,47 +86,79 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Invalid seriesOrder' }, { status: 400 })
   }
 
-  if (!Array.isArray(seriesOrder) || seriesOrder.length < 1 || seriesOrder.length > 5) {
+  if (
+    !Array.isArray(seriesOrder) ||
+    seriesOrder.length < 1 ||
+    seriesOrder.length > MAX_SERIES ||
+    !seriesOrder.every((id) => typeof id === 'string')
+  ) {
     return Response.json({ error: 'A test must have 1 to 5 series' }, { status: 400 })
   }
 
-  // Collect and validate the photos per series up front so we fail before uploading anything.
-  const collected: { id: string; files: File[] }[] = []
-  for (const id of seriesOrder) {
+  // Collect, validate, and content-sniff every photo up front so we reject
+  // bad input before touching storage. The client series id is only used to
+  // group the form fields here; the stored/path id is generated server-side.
+  const collected: ValidatedFile[][] = []
+  let totalBytes = 0
+  for (const clientId of seriesOrder) {
     const files = formData
-      .getAll(`series_${id}`)
+      .getAll(`series_${clientId}`)
       .filter((entry): entry is File => entry instanceof File)
 
-    if (files.length < 2 || files.length > 5) {
+    if (files.length < MIN_PHOTOS_PER_SERIES || files.length > MAX_PHOTOS_PER_SERIES) {
       return Response.json(
         { error: 'Each series must have 2 to 5 photos' },
         { status: 400 }
       )
     }
-    collected.push({ id, files })
+
+    const validated: ValidatedFile[] = []
+    for (const file of files) {
+      if (file.size === 0 || file.size > MAX_FILE_BYTES) {
+        return Response.json(
+          { error: 'Each photo must be a non-empty image under 8 MB' },
+          { status: 400 }
+        )
+      }
+      totalBytes += file.size
+      if (totalBytes > MAX_TOTAL_BYTES) {
+        return Response.json({ error: 'Total upload is too large' }, { status: 400 })
+      }
+
+      const head = new Uint8Array(await file.slice(0, 12).arrayBuffer())
+      const mime = sniffImageType(head)
+      if (!mime) {
+        return Response.json(
+          { error: 'Photos must be JPEG, PNG, WebP, or GIF images' },
+          { status: 400 }
+        )
+      }
+      validated.push({ file, mime, ext: ALLOWED_TYPES[mime] })
+    }
+    collected.push(validated)
   }
 
   try {
     const supabase = getSupabaseAdmin()
     const testId = nanoid()
+    const resultsToken = nanoid()
 
     const series: { id: string; images: string[] }[] = []
-    for (const { id, files } of collected) {
+    for (const files of collected) {
+      const seriesId = nanoid() // server-generated, path-safe
       const images: string[] = []
       for (let index = 0; index < files.length; index++) {
-        const file = files[index]
-        const path = `${testId}/${id}/${index}.${extFor(file)}`
+        const { file, mime, ext } = files[index]
+        const path = `${testId}/${seriesId}/${index}.${ext}`
 
         const { error: uploadError } = await supabase.storage
           .from(PHOTOS_BUCKET)
-          .upload(path, file, {
-            contentType: file.type || 'image/jpeg',
-            upsert: true,
-          })
+          .upload(path, file, { contentType: mime, upsert: false })
 
         if (uploadError) {
+          console.error('[api/create] upload failed:', uploadError)
           return Response.json(
-            { error: `Upload failed: ${uploadError.message}` },
+            { error: 'Could not upload photos. Please try again.' },
             { status: 500 }
           )
         }
@@ -93,27 +168,29 @@ export async function POST(request: Request) {
         } = supabase.storage.from(PHOTOS_BUCKET).getPublicUrl(path)
         images.push(publicUrl)
       }
-      series.push({ id, images })
+      series.push({ id: seriesId, images })
     }
 
     const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
 
     const { error: insertError } = await supabase
       .from('tests')
-      .insert({ id: testId, series, expires_at: expiresAt })
+      .insert({ id: testId, series, expires_at: expiresAt, results_token: resultsToken })
 
     if (insertError) {
+      console.error('[api/create] insert failed:', insertError)
       return Response.json(
-        { error: `Could not create test: ${insertError.message}` },
+        { error: 'Could not create test. Please try again.' },
         { status: 500 }
       )
     }
 
-    return Response.json({ id: testId })
+    return Response.json({ id: testId, resultsToken })
   } catch (err) {
     console.error('[api/create] failed:', err)
-    const message =
-      err instanceof Error ? err.message : 'Unexpected server error'
-    return Response.json({ error: message }, { status: 500 })
+    return Response.json(
+      { error: 'Something went wrong. Please try again.' },
+      { status: 500 }
+    )
   }
 }
