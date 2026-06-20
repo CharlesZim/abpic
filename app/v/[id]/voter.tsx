@@ -14,267 +14,155 @@ function getVoterId(): string {
   return id
 }
 
-/* ---------- icons ---------- */
-
-function ZoomIcon() {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="11" cy="11" r="7" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-      <line x1="11" y1="8" x2="11" y2="14" />
-      <line x1="8" y1="11" x2="14" y2="11" />
-    </svg>
-  )
+function buzz(ms: number) {
+  if (typeof navigator !== 'undefined') navigator.vibrate?.(ms)
 }
 
-function CheckIcon() {
+/* ---------- icons ---------- */
+
+function CheckIcon({ size = 18 }: { size?: number }) {
   return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="20 6 9 17 4 12" />
     </svg>
   )
 }
 
-function CloseIcon() {
+function ChevronLeftIcon() {
   return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="15 18 9 12 15 6" />
     </svg>
   )
 }
 
-/* ---------- fullscreen pinch-to-zoom viewer ---------- */
-
-function ZoomModal({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
-  const imgRef = useRef<HTMLImageElement>(null)
-  const view = useRef({ scale: 1, tx: 0, ty: 0 })
-  const pointers = useRef(new Map<number, { x: number; y: number }>())
-  const pinch = useRef<{ dist: number; scale: number } | null>(null)
-  const pan = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
-
-  function apply() {
-    const el = imgRef.current
-    if (el) {
-      const { scale, tx, ty } = view.current
-      el.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`
-    }
-  }
-
-  function reset() {
-    view.current = { scale: 1, tx: 0, ty: 0 }
-    apply()
-  }
-
-  useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => {
-      document.body.style.overflow = prev
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [onClose])
-
-  const points = () => Array.from(pointers.current.values())
-  const distance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-    Math.hypot(a.x - b.x, a.y - b.y)
-
-  function onPointerDown(e: React.PointerEvent) {
-    ;(e.target as Element).setPointerCapture?.(e.pointerId)
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-    if (pointers.current.size === 2) {
-      const [a, b] = points()
-      pinch.current = { dist: distance(a, b), scale: view.current.scale }
-      pan.current = null
-    } else if (pointers.current.size === 1) {
-      pan.current = {
-        x: e.clientX,
-        y: e.clientY,
-        tx: view.current.tx,
-        ty: view.current.ty,
-      }
-    }
-  }
-
-  function onPointerMove(e: React.PointerEvent) {
-    if (!pointers.current.has(e.pointerId)) return
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-
-    if (pointers.current.size >= 2 && pinch.current) {
-      const [a, b] = points()
-      const next = pinch.current.scale * (distance(a, b) / pinch.current.dist)
-      view.current.scale = Math.min(5, Math.max(1, next))
-      apply()
-    } else if (pointers.current.size === 1 && pan.current && view.current.scale > 1) {
-      view.current.tx = pan.current.tx + (e.clientX - pan.current.x)
-      view.current.ty = pan.current.ty + (e.clientY - pan.current.y)
-      apply()
-    }
-  }
-
-  function onPointerUp(e: React.PointerEvent) {
-    pointers.current.delete(e.pointerId)
-    pinch.current = null
-    pan.current = null
-    if (view.current.scale <= 1) reset()
-  }
-
+function ArrowRightIcon() {
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black">
-      <div className="flex justify-end p-3">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Fermer"
-          className="rounded-full bg-white/15 p-2 text-white active:scale-95"
-        >
-          <CloseIcon />
-        </button>
-      </div>
-      <div
-        className="flex flex-1 touch-none select-none items-center justify-center overflow-hidden"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onDoubleClick={() => {
-          view.current = view.current.scale > 1 ? { scale: 1, tx: 0, ty: 0 } : { scale: 2.5, tx: 0, ty: 0 }
-          apply()
-        }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          ref={imgRef}
-          src={src}
-          alt={alt}
-          draggable={false}
-          className="max-h-full max-w-full object-contain will-change-transform"
-          style={{ transformOrigin: 'center center', pointerEvents: 'none' }}
-        />
-      </div>
-      <p className="pb-6 pt-2 text-center text-xs text-white/60">
-        Pince pour zoomer · double-tape pour réinitialiser
-      </p>
-    </div>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="5" y1="12" x2="19" y2="12" />
+      <polyline points="12 5 19 12 12 19" />
+    </svg>
   )
 }
 
-/* ---------- single comparable photo ---------- */
+/* ---------- one comparable photo (tap = pick, pinch = zoom) ---------- */
 
-function Photo({
+function ComparePhoto({
   src,
   index,
   selected,
+  faded,
   onSelect,
-  onZoom,
 }: {
   src: string
   index: number
   selected: boolean
+  faded: boolean
   onSelect: () => void
-  onZoom: () => void
 }) {
   const [loaded, setLoaded] = useState(false)
   const imgRef = useRef<HTMLImageElement>(null)
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
+  const startDist = useRef(0)
+  const everPinched = useRef(false)
+  const moved = useRef(false)
+  const startPoint = useRef<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
     if (imgRef.current?.complete) setLoaded(true)
   }, [src])
 
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={onSelect}
-        aria-pressed={selected}
-        className={`block w-full overflow-hidden rounded-2xl border-2 transition ${
-          selected
-            ? 'border-blue-600 ring-2 ring-blue-600/30'
-            : 'border-zinc-200 dark:border-zinc-700'
-        }`}
-      >
-        <div className="relative aspect-[3/4] bg-zinc-100 dark:bg-zinc-900">
-          {!loaded && (
-            <div className="absolute inset-0 animate-pulse bg-zinc-200 dark:bg-zinc-800" />
-          )}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            ref={imgRef}
-            src={src}
-            alt={`Option ${index + 1}`}
-            onLoad={() => setLoaded(true)}
-            className={`absolute inset-0 h-full w-full object-contain transition-opacity ${
-              loaded ? 'opacity-100' : 'opacity-0'
-            }`}
-          />
-          {selected && (
-            <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white shadow">
-              <CheckIcon />
-            </span>
-          )}
-        </div>
-      </button>
+  const pts = () => Array.from(pointers.current.values())
+  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y)
 
-      <button
-        type="button"
-        onClick={onZoom}
-        aria-label="Agrandir la photo"
-        className="absolute left-2 top-2 rounded-full bg-black/55 p-2 text-white backdrop-blur active:scale-95"
+  function setScale(scale: number, animate = false) {
+    const el = imgRef.current
+    if (!el) return
+    el.style.transition = animate ? 'transform .25s ease' : 'none'
+    el.style.transform = `scale(${scale})`
+    el.style.zIndex = scale > 1 ? '30' : ''
+  }
+
+  function onDown(e: React.PointerEvent) {
+    ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (pointers.current.size === 1) {
+      startPoint.current = { x: e.clientX, y: e.clientY }
+      moved.current = false
+    } else if (pointers.current.size === 2) {
+      everPinched.current = true
+      const [a, b] = pts()
+      startDist.current = dist(a, b) || 1
+    }
+  }
+
+  function onMove(e: React.PointerEvent) {
+    if (!pointers.current.has(e.pointerId)) return
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (pointers.current.size >= 2) {
+      const [a, b] = pts()
+      setScale(Math.min(4, Math.max(1, dist(a, b) / startDist.current)))
+    } else if (pointers.current.size === 1 && startPoint.current) {
+      if (dist(startPoint.current, { x: e.clientX, y: e.clientY }) > 10) moved.current = true
+    }
+  }
+
+  function onUp(e: React.PointerEvent) {
+    pointers.current.delete(e.pointerId)
+    if (pointers.current.size < 2) setScale(1, true)
+    if (pointers.current.size === 0) {
+      if (!everPinched.current && !moved.current) {
+        buzz(12)
+        onSelect()
+      }
+      everPinched.current = false
+      moved.current = false
+      startPoint.current = null
+    }
+  }
+
+  return (
+    <div
+      className="relative flex touch-none items-center justify-center"
+      onPointerDown={onDown}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerCancel={onUp}
+    >
+      <div
+        className={`relative h-full w-full overflow-hidden rounded-[28px] transition duration-200 ${
+          selected ? 'ring-[3px] ring-white' : 'ring-1 ring-white/10'
+        } ${faded ? 'scale-[0.97] opacity-40' : ''}`}
       >
-        <ZoomIcon />
-      </button>
+        {!loaded && <div className="absolute inset-0 animate-pulse bg-white/10" />}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          ref={imgRef}
+          src={src}
+          alt={`Option ${index + 1}`}
+          draggable={false}
+          onLoad={() => setLoaded(true)}
+          className={`h-full w-full object-contain transition-opacity duration-300 ${
+            loaded ? 'opacity-100' : 'opacity-0'
+          }`}
+          style={{ pointerEvents: 'none', transformOrigin: 'center' }}
+        />
+        {selected && (
+          <span className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white text-black shadow-lg">
+            <CheckIcon />
+          </span>
+        )}
+      </div>
     </div>
   )
 }
 
 /* ---------- main voter ---------- */
 
-export default function Voter({
-  testId,
-  series,
-}: {
-  testId: string
-  series: Series[]
-}) {
+export default function Voter({ testId, series }: { testId: string; series: Series[] }) {
   const [index, setIndex] = useState(0)
-  const [selections, setSelections] = useState<(number | null)[]>(() =>
-    series.map(() => null)
-  )
-  const [zoom, setZoom] = useState<{ src: string; alt: string } | null>(null)
+  const [selections, setSelections] = useState<(number | null)[]>(() => series.map(() => null))
   const [error, setError] = useState<string | null>(null)
 
   async function sendVote(seriesId: string, imageIndex: number) {
@@ -308,93 +196,117 @@ export default function Voter({
     })
   }
 
-  function valider() {
+  function next() {
     const choice = selections[index]
     if (choice === null) return
+    buzz(20)
     sendVote(series[index].id, choice)
     setIndex((i) => i + 1)
   }
 
-  function precedent() {
+  function back() {
+    buzz(8)
     setIndex((i) => Math.max(0, i - 1))
   }
 
   if (index >= series.length) {
     return (
-      <main className="mx-auto flex min-h-screen w-full max-w-md flex-col items-center justify-center gap-3 p-6 text-center">
-        <h1 className="text-2xl font-bold">Merci, c’est voté !</h1>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-      </main>
+      <div
+        className="fixed inset-0 flex flex-col items-center justify-center gap-5 bg-black text-white"
+        style={{ padding: 'env(safe-area-inset-top) 1.5rem env(safe-area-inset-bottom)' }}
+      >
+        <div className="relative flex h-24 w-24 items-center justify-center">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600 opacity-60 motion-safe:animate-ping" />
+          <span className="relative flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600">
+            <CheckIcon size={44} />
+          </span>
+        </div>
+        <h1 className="text-3xl font-extrabold tracking-tight">Merci, c’est voté !</h1>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+      </div>
     )
   }
 
   const current = series[index]
   const selected = selections[index]
-  const gridCols =
-    current.images.length === 2 ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'
-  const progress = ((index + 1) / series.length) * 100
+  const isLast = index === series.length - 1
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col">
-      <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/85 px-5 pb-3 pt-4 backdrop-blur dark:border-zinc-800 dark:bg-black/80">
-        <div className="flex items-center justify-between text-sm font-medium">
-          <span>
-            Série {index + 1} / {series.length}
-          </span>
-        </div>
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-          <div
-            className="h-full rounded-full bg-blue-600 transition-all"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-        <p className="mt-2 text-xs text-zinc-500">
-          Aide à choisir — tape ta préférée dans chaque série.
-        </p>
-      </header>
-
-      <main className="flex-1 px-5 py-5">
-        {error && (
-          <p className="mb-4 rounded-lg bg-red-50 p-2 text-sm text-red-600 dark:bg-red-950">
-            {error}
-          </p>
-        )}
-        <div className={`grid gap-3 ${gridCols}`}>
-          {current.images.map((src, imageIndex) => (
-            <Photo
-              key={imageIndex}
-              src={src}
-              index={imageIndex}
-              selected={selected === imageIndex}
-              onSelect={() => select(imageIndex)}
-              onZoom={() => setZoom({ src, alt: `Option ${imageIndex + 1}` })}
+    <div
+      className="fixed inset-0 flex select-none flex-col bg-black text-white"
+      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
+      {/* story-style progress */}
+      <div className="flex gap-1.5 px-3 pt-3">
+        {series.map((s, i) => (
+          <div key={s.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/25">
+            <div
+              className={`h-full rounded-full bg-white transition-all duration-300 ${
+                i <= index ? 'w-full' : 'w-0'
+              }`}
             />
-          ))}
-        </div>
-      </main>
+          </div>
+        ))}
+      </div>
 
-      <footer className="sticky bottom-0 flex gap-3 border-t border-zinc-200 bg-white/85 px-5 py-4 backdrop-blur dark:border-zinc-800 dark:bg-black/80">
-        <button
-          type="button"
-          onClick={precedent}
-          disabled={index === 0}
-          className="rounded-xl border border-zinc-300 px-5 py-3 font-medium disabled:opacity-40 dark:border-zinc-600"
-        >
-          Précédent
-        </button>
-        <button
-          type="button"
-          onClick={valider}
-          disabled={selected === null}
-          className="flex-1 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white disabled:opacity-40"
-        >
-          Valider
-        </button>
-      </footer>
+      {/* back + context */}
+      <div className="flex items-center gap-3 px-3 pb-1 pt-3">
+        {index > 0 ? (
+          <button
+            type="button"
+            onClick={back}
+            aria-label="Précédent"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 active:scale-90"
+          >
+            <ChevronLeftIcon />
+          </button>
+        ) : (
+          <span className="h-9 w-9" />
+        )}
+        <p className="text-[13px] font-medium text-white/55">
+          Tape ta préférée · pince pour zoomer
+        </p>
+      </div>
 
-      {zoom && (
-        <ZoomModal src={zoom.src} alt={zoom.alt} onClose={() => setZoom(null)} />
+      {/* photos */}
+      <div
+        className="grid min-h-0 flex-1 gap-2.5 p-2.5"
+        style={{ gridTemplateColumns: '1fr 1fr', gridAutoRows: '1fr' }}
+      >
+        {current.images.map((src, imageIndex) => (
+          <ComparePhoto
+            key={imageIndex}
+            src={src}
+            index={imageIndex}
+            selected={selected === imageIndex}
+            faded={selected !== null && selected !== imageIndex}
+            onSelect={() => select(imageIndex)}
+          />
+        ))}
+      </div>
+
+      {error && (
+        <p className="mx-4 mb-1 rounded-xl bg-red-500/15 px-3 py-2 text-center text-sm text-red-300">
+          {error}
+        </p>
       )}
+
+      {/* CTA */}
+      <div className="px-4 pb-4 pt-2">
+        <button
+          type="button"
+          onClick={next}
+          disabled={selected === null}
+          className={`flex w-full items-center justify-center gap-2 rounded-full py-4 text-base font-bold transition active:scale-[0.98] ${
+            selected === null
+              ? 'bg-white/10 text-white/40'
+              : 'bg-gradient-to-r from-fuchsia-500 to-violet-600 text-white shadow-lg shadow-fuchsia-500/25'
+          }`}
+        >
+          {selected === null ? 'Choisis ta préférée' : isLast ? 'Terminer' : 'Suivant'}
+          {selected !== null && <ArrowRightIcon />}
+        </button>
+      </div>
     </div>
   )
 }
