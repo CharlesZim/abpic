@@ -17,7 +17,10 @@ const MIN_PHOTOS = 2
 const COMPRESSION_OPTIONS = {
   maxWidthOrHeight: 1080,
   maxSizeMB: 0.4,
-  useWebWorker: true,
+  // Run on the main thread: the web-worker path imports the library from a
+  // CDN at runtime, which fails (e.g. Safari throws "The string did not match
+  // the expected pattern.") when that request is blocked or offline.
+  useWebWorker: false,
 }
 
 function newId() {
@@ -108,15 +111,21 @@ export default function Home() {
 
       for (const s of series) {
         for (const photo of s.photos) {
-          const compressed = await imageCompression(photo.file, COMPRESSION_OPTIONS)
-          formData.append(`series_${s.id}`, compressed, photo.file.name)
+          let toUpload: Blob = photo.file
+          try {
+            toUpload = await imageCompression(photo.file, COMPRESSION_OPTIONS)
+          } catch {
+            // If compression fails for an image, upload the original instead.
+            toUpload = photo.file
+          }
+          formData.append(`series_${s.id}`, toUpload, photo.file.name)
         }
       }
 
       const res = await fetch('/api/create', { method: 'POST', body: formData })
-      const data = await res.json()
+      const data = await res.json().catch(() => null)
       if (!res.ok) {
-        throw new Error(data?.error || 'Something went wrong')
+        throw new Error(data?.error || `Request failed (${res.status})`)
       }
       setResultId(data.id)
     } catch (err) {
