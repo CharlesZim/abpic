@@ -12,18 +12,28 @@ export default function Voter({
   series: Series[]
 }) {
   const [index, setIndex] = useState(0)
+  const [voteError, setVoteError] = useState<string | null>(null)
 
-  function vote(seriesId: string, imageIndex: number) {
-    // Fire-and-forget so the UI advances instantly; anonymous best-effort vote.
-    fetch('/api/vote', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        test_id: testId,
-        series_id: seriesId,
-        image_index: imageIndex,
-      }),
-    }).catch(() => {})
+  async function vote(seriesId: string, imageIndex: number) {
+    // Advance instantly (optimistic); surface failures in a banner instead of
+    // silently dropping votes so a misconfigured `votes` table is visible.
+    try {
+      const res = await fetch('/api/vote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          test_id: testId,
+          series_id: seriesId,
+          image_index: imageIndex,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        setVoteError(data?.error || `Vote failed (${res.status})`)
+      }
+    } catch {
+      setVoteError('Vote failed — check your connection.')
+    }
   }
 
   function handleTap(imageIndex: number) {
@@ -39,6 +49,11 @@ export default function Voter({
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           Your responses have been recorded.
         </p>
+        {voteError && (
+          <p className="text-sm text-red-600">
+            Some votes may not have been saved: {voteError}
+          </p>
+        )}
       </main>
     )
   }
@@ -53,6 +68,12 @@ export default function Voter({
         </p>
         <h1 className="text-xl font-bold">Tap your favorite</h1>
       </header>
+
+      {voteError && (
+        <p className="rounded-lg bg-red-50 p-2 text-sm text-red-600 dark:bg-red-950">
+          {voteError}
+        </p>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         {current.images.map((src, imageIndex) => (
