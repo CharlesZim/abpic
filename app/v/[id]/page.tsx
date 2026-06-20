@@ -11,9 +11,9 @@ function isExpired(expiresAt: string): boolean {
 function Expired() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col items-center justify-center gap-3 p-6 text-center">
-      <h1 className="text-2xl font-bold">This test has expired</h1>
+      <h1 className="text-2xl font-bold">Ce test a expiré</h1>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        Voting is no longer available for this link.
+        Le vote n’est plus disponible pour ce lien.
       </p>
     </main>
   )

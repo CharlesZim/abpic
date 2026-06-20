@@ -8,11 +8,15 @@ export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => null)
     const test_id = body?.test_id
+    const voter_id = body?.voter_id
     const series_id = body?.series_id
     const image_index = body?.image_index
 
     if (
       typeof test_id !== 'string' ||
+      typeof voter_id !== 'string' ||
+      voter_id.length === 0 ||
+      voter_id.length > 100 ||
       typeof series_id !== 'string' ||
       typeof image_index !== 'number' ||
       !Number.isInteger(image_index) ||
@@ -43,12 +47,17 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Invalid vote' }, { status: 400 })
     }
 
+    // Upsert so a voter changing an earlier choice updates their row instead
+    // of inserting a duplicate (requires a unique index on the conflict cols).
     const { error } = await supabase
       .from('votes')
-      .insert({ test_id, series_id, image_index })
+      .upsert(
+        { test_id, voter_id, series_id, image_index },
+        { onConflict: 'test_id,voter_id,series_id' }
+      )
 
     if (error) {
-      console.error('[api/vote] insert failed:', error)
+      console.error('[api/vote] upsert failed:', error)
       return Response.json(
         { error: 'Could not record your vote.' },
         { status: 500 }
