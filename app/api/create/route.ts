@@ -63,50 +63,57 @@ export async function POST(request: Request) {
     collected.push({ id, files })
   }
 
-  const supabase = getSupabaseAdmin()
-  const testId = nanoid()
+  try {
+    const supabase = getSupabaseAdmin()
+    const testId = nanoid()
 
-  const series: { id: string; images: string[] }[] = []
-  for (const { id, files } of collected) {
-    const images: string[] = []
-    for (let index = 0; index < files.length; index++) {
-      const file = files[index]
-      const path = `${testId}/${id}/${index}.${extFor(file)}`
+    const series: { id: string; images: string[] }[] = []
+    for (const { id, files } of collected) {
+      const images: string[] = []
+      for (let index = 0; index < files.length; index++) {
+        const file = files[index]
+        const path = `${testId}/${id}/${index}.${extFor(file)}`
 
-      const { error: uploadError } = await supabase.storage
-        .from(PHOTOS_BUCKET)
-        .upload(path, file, {
-          contentType: file.type || 'image/jpeg',
-          upsert: true,
-        })
+        const { error: uploadError } = await supabase.storage
+          .from(PHOTOS_BUCKET)
+          .upload(path, file, {
+            contentType: file.type || 'image/jpeg',
+            upsert: true,
+          })
 
-      if (uploadError) {
-        return Response.json(
-          { error: `Upload failed: ${uploadError.message}` },
-          { status: 500 }
-        )
+        if (uploadError) {
+          return Response.json(
+            { error: `Upload failed: ${uploadError.message}` },
+            { status: 500 }
+          )
+        }
+
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from(PHOTOS_BUCKET).getPublicUrl(path)
+        images.push(publicUrl)
       }
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from(PHOTOS_BUCKET).getPublicUrl(path)
-      images.push(publicUrl)
+      series.push({ id, images })
     }
-    series.push({ id, images })
+
+    const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
+
+    const { error: insertError } = await supabase
+      .from('tests')
+      .insert({ id: testId, series, expires_at: expiresAt })
+
+    if (insertError) {
+      return Response.json(
+        { error: `Could not create test: ${insertError.message}` },
+        { status: 500 }
+      )
+    }
+
+    return Response.json({ id: testId })
+  } catch (err) {
+    console.error('[api/create] failed:', err)
+    const message =
+      err instanceof Error ? err.message : 'Unexpected server error'
+    return Response.json({ error: message }, { status: 500 })
   }
-
-  const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
-
-  const { error: insertError } = await supabase
-    .from('tests')
-    .insert({ id: testId, series, expires_at: expiresAt })
-
-  if (insertError) {
-    return Response.json(
-      { error: `Could not create test: ${insertError.message}` },
-      { status: 500 }
-    )
-  }
-
-  return Response.json({ id: testId })
 }
