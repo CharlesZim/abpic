@@ -37,7 +37,7 @@ export default function Home() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resultId, setResultId] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
   function addSeries() {
     setSeries((prev) =>
@@ -136,32 +136,58 @@ export default function Home() {
   }
 
   if (resultId) {
-    const link =
-      typeof window !== 'undefined'
-        ? `${window.location.origin}/v/${resultId}`
-        : `/v/${resultId}`
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    const shareLink = `${origin}/v/${resultId}`
+    const resultsLink = `${origin}/r/${resultId}`
+
+    async function copy(key: string, value: string) {
+      await navigator.clipboard.writeText(value)
+      setCopiedKey(key)
+      setTimeout(() => setCopiedKey(null), 2000)
+    }
+
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-md flex-col gap-6 p-6">
         <h1 className="text-2xl font-bold">Test created</h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Share this link to collect votes.
-        </p>
+
         <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium">Share this link to collect votes</p>
           <code className="break-all rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-            {link}
+            {shareLink}
           </code>
           <button
             type="button"
-            onClick={async () => {
-              await navigator.clipboard.writeText(link)
-              setCopied(true)
-              setTimeout(() => setCopied(false), 2000)
-            }}
+            onClick={() => copy('share', shareLink)}
             className="rounded-lg bg-black px-4 py-3 font-medium text-white dark:bg-white dark:text-black"
           >
-            {copied ? 'Copied!' : 'Copy link'}
+            {copiedKey === 'share' ? 'Copied!' : 'Copy voting link'}
           </button>
         </div>
+
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium">
+            Your results link — keep this to check results later
+          </p>
+          <code className="break-all rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+            {resultsLink}
+          </code>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => copy('results', resultsLink)}
+              className="flex-1 rounded-lg border border-zinc-300 px-4 py-3 font-medium dark:border-zinc-600"
+            >
+              {copiedKey === 'results' ? 'Copied!' : 'Copy results link'}
+            </button>
+            <a
+              href={resultsLink}
+              className="flex-1 rounded-lg border border-zinc-300 px-4 py-3 text-center font-medium dark:border-zinc-600"
+            >
+              View results
+            </a>
+          </div>
+        </div>
+
         <button
           type="button"
           onClick={() => {
