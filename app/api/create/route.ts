@@ -143,33 +143,42 @@ export async function POST(request: Request) {
     const testId = nanoid()
     const resultsToken = nanoid()
 
-    const series: { id: string; images: string[] }[] = []
-    for (const files of collected) {
-      const seriesId = nanoid() // server-generated, path-safe
-      const images: string[] = []
-      for (let index = 0; index < files.length; index++) {
-        const { file, mime, ext } = files[index]
-        const path = `${testId}/${seriesId}/${index}.${ext}`
+    // Server-generated, path-safe series ids.
+    const seriesMeta = collected.map((files) => ({ seriesId: nanoid(), files }))
 
-        const { error: uploadError } = await supabase.storage
+    // Upload every photo in parallel instead of one-by-one (the previous
+    // sequential loop was the main source of slowness on submit).
+    const uploads = seriesMeta.flatMap(({ seriesId, files }) =>
+      files.map((vf, index) =>
+        supabase.storage
           .from(PHOTOS_BUCKET)
-          .upload(path, file, { contentType: mime, upsert: false })
+          .upload(`${testId}/${seriesId}/${index}.${vf.ext}`, vf.file, {
+            contentType: vf.mime,
+            upsert: false,
+          })
+      )
+    )
 
-        if (uploadError) {
-          console.error('[api/create] upload failed:', uploadError)
-          return Response.json(
-            { error: 'Could not upload photos. Please try again.' },
-            { status: 500 }
-          )
-        }
-
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from(PHOTOS_BUCKET).getPublicUrl(path)
-        images.push(publicUrl)
-      }
-      series.push({ id: seriesId, images })
+    const uploadResults = await Promise.all(uploads)
+    const failed = uploadResults.find((r) => r.error)
+    if (failed) {
+      console.error('[api/create] upload failed:', failed.error)
+      return Response.json(
+        { error: 'Could not upload photos. Please try again.' },
+        { status: 500 }
+      )
     }
+
+    const series = seriesMeta.map(({ seriesId, files }) => ({
+      id: seriesId,
+      images: files.map(
+        (vf, index) =>
+          supabase.storage
+            .from(PHOTOS_BUCKET)
+            .getPublicUrl(`${testId}/${seriesId}/${index}.${vf.ext}`).data
+            .publicUrl
+      ),
+    }))
 
     const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
 

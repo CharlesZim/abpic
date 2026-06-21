@@ -27,6 +27,26 @@ function newId() {
   return crypto.randomUUID()
 }
 
+// Run async work over a list with limited concurrency, preserving order.
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++
+      results[i] = await fn(items[i], i)
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker)
+  )
+  return results
+}
+
 function emptySeries(): Series {
   return { id: newId(), photos: [] }
 }
@@ -35,6 +55,7 @@ export default function Home() {
   const [series, setSeries] = useState<Series[]>([emptySeries()])
   const [duration, setDuration] = useState<Duration>('3h')
   const [submitting, setSubmitting] = useState(false)
+  const [progress, setProgress] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [resultId, setResultId] = useState<string | null>(null)
   const [resultsToken, setResultsToken] = useState<string | null>(null)
@@ -110,19 +131,31 @@ export default function Home() {
       formData.append('duration', duration)
       formData.append('seriesOrder', JSON.stringify(series.map((s) => s.id)))
 
-      for (const s of series) {
-        for (const photo of s.photos) {
-          let toUpload: Blob = photo.file
-          try {
-            toUpload = await imageCompression(photo.file, COMPRESSION_OPTIONS)
-          } catch {
-            // If compression fails for an image, upload the original instead.
-            toUpload = photo.file
-          }
-          formData.append(`series_${s.id}`, toUpload, photo.file.name)
+      // Compress photos in parallel (capped) instead of one-by-one, with a
+      // visible counter so the button doesn't look frozen.
+      const items = series.flatMap((s) =>
+        s.photos.map((photo) => ({ seriesId: s.id, photo }))
+      )
+      const total = items.length
+      let done = 0
+      setProgress(`Compression… 0/${total}`)
+      const compressed = await mapLimit(items, 4, async ({ photo }) => {
+        let out: Blob = photo.file
+        try {
+          out = await imageCompression(photo.file, COMPRESSION_OPTIONS)
+        } catch {
+          // If compression fails for an image, upload the original instead.
+          out = photo.file
         }
-      }
+        done += 1
+        setProgress(`Compression… ${done}/${total}`)
+        return out
+      })
+      items.forEach((it, i) => {
+        formData.append(`series_${it.seriesId}`, compressed[i], it.photo.file.name)
+      })
 
+      setProgress('Envoi…')
       const res = await fetch('/api/create', { method: 'POST', body: formData })
       const data = await res.json().catch(() => null)
       if (!res.ok) {
@@ -134,6 +167,7 @@ export default function Home() {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
       setSubmitting(false)
+      setProgress(null)
     }
   }
 
@@ -317,7 +351,7 @@ export default function Home() {
         disabled={submitting}
         className="rounded-lg bg-black px-4 py-3 font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
       >
-        {submitting ? 'Creating…' : 'Create test'}
+        {submitting ? progress ?? 'Creating…' : 'Create test'}
       </button>
     </main>
   )
