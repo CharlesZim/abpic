@@ -55,7 +55,6 @@ export default function Home() {
   const [series, setSeries] = useState<Series[]>([emptySeries()])
   const [duration, setDuration] = useState<Duration>('3h')
   const [submitting, setSubmitting] = useState(false)
-  const [progress, setProgress] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [resultId, setResultId] = useState<string | null>(null)
   const [resultsToken, setResultsToken] = useState<string | null>(null)
@@ -131,31 +130,22 @@ export default function Home() {
       formData.append('duration', duration)
       formData.append('seriesOrder', JSON.stringify(series.map((s) => s.id)))
 
-      // Compress photos in parallel (capped) instead of one-by-one, with a
-      // visible counter so the button doesn't look frozen.
+      // Compress photos in parallel (capped) instead of one-by-one.
       const items = series.flatMap((s) =>
         s.photos.map((photo) => ({ seriesId: s.id, photo }))
       )
-      const total = items.length
-      let done = 0
-      setProgress(`Compression… 0/${total}`)
       const compressed = await mapLimit(items, 4, async ({ photo }) => {
-        let out: Blob = photo.file
         try {
-          out = await imageCompression(photo.file, COMPRESSION_OPTIONS)
+          return await imageCompression(photo.file, COMPRESSION_OPTIONS)
         } catch {
           // If compression fails for an image, upload the original instead.
-          out = photo.file
+          return photo.file
         }
-        done += 1
-        setProgress(`Compression… ${done}/${total}`)
-        return out
       })
       items.forEach((it, i) => {
         formData.append(`series_${it.seriesId}`, compressed[i], it.photo.file.name)
       })
 
-      setProgress('Envoi…')
       const res = await fetch('/api/create', { method: 'POST', body: formData })
       const data = await res.json().catch(() => null)
       if (!res.ok) {
@@ -167,7 +157,6 @@ export default function Home() {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
       setSubmitting(false)
-      setProgress(null)
     }
   }
 
@@ -351,7 +340,7 @@ export default function Home() {
         disabled={submitting}
         className="rounded-lg bg-black px-4 py-3 font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
       >
-        {submitting ? progress ?? 'Creating…' : 'Create test'}
+        {submitting ? 'Création…' : 'Create test'}
       </button>
     </main>
   )

@@ -36,149 +36,215 @@ function ChevronLeftIcon() {
   )
 }
 
-function CloseIcon() {
+/* ---------- one slide ---------- */
+
+function Slide({
+  src,
+  number,
+  imgRef,
+}: {
+  src: string
+  number: number
+  imgRef: (el: HTMLImageElement | null) => void
+}) {
+  const [loaded, setLoaded] = useState(false)
+  const localRef = useRef<HTMLImageElement | null>(null)
+
+  useEffect(() => {
+    if (localRef.current?.complete) setLoaded(true)
+  }, [src])
+
   return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
+    <div className="relative flex h-full w-full shrink-0 items-center justify-center p-3">
+      {!loaded && <div className="absolute inset-8 animate-pulse rounded-3xl bg-white/10" />}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        ref={(el) => {
+          localRef.current = el
+          imgRef(el)
+        }}
+        src={src}
+        alt={`Photo ${number}`}
+        draggable={false}
+        onLoad={() => setLoaded(true)}
+        className={`max-h-full max-w-full rounded-3xl object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+        style={{ pointerEvents: 'none', transformOrigin: 'center', willChange: 'transform' }}
+      />
+      <span className="pointer-events-none absolute left-4 top-4 flex h-9 min-w-9 items-center justify-center rounded-full bg-black/55 px-2.5 text-base font-bold text-white backdrop-blur">
+        {number}
+      </span>
+    </div>
   )
 }
 
-/* ---------- fullscreen pinch-to-zoom viewer ---------- */
+/* ---------- gesture carousel: swipe to navigate, pinch to zoom ---------- */
 
-function ZoomModal({ src, onClose }: { src: string; onClose: () => void }) {
-  const imgRef = useRef<HTMLImageElement>(null)
-  const view = useRef({ scale: 1, tx: 0, ty: 0 })
+function Carousel({ images, onPhotoChange }: { images: string[]; onPhotoChange: (i: number) => void }) {
+  const [idx, setIdx] = useState(0)
+  const idxRef = useRef(0) // kept in sync inside the gesture handlers below
+
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const trackRef = useRef<HTMLDivElement>(null)
+  const imgRefs = useRef<Array<HTMLImageElement | null>>([])
+  const widthRef = useRef(0)
+
   const pointers = useRef(new Map<number, { x: number; y: number }>())
-  const pinch = useRef<{ dist: number; scale: number } | null>(null)
-  const pan = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
+  const everPinched = useRef(false)
+  const swipe = useRef({ startX: 0, dx: 0 })
+  const pinch = useRef({ dist: 0, scale: 1, midX: 0, midY: 0, tx: 0, ty: 0 })
+  const pan = useRef({ x: 0, y: 0, tx: 0, ty: 0 })
+  const zoom = useRef({ scale: 1, tx: 0, ty: 0 })
 
-  function apply() {
-    const el = imgRef.current
-    if (el) {
-      const { scale, tx, ty } = view.current
-      el.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`
-    }
+  const width = () => widthRef.current || viewportRef.current?.clientWidth || 1
+  const pts = () => Array.from(pointers.current.values())
+  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y)
+  const mid = (a: { x: number; y: number }, b: { x: number; y: number }) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
+
+  function applyTrack(animate = false) {
+    const el = trackRef.current
+    if (!el) return
+    el.style.transition = animate ? 'transform .28s cubic-bezier(.22,.61,.36,1)' : 'none'
+    el.style.transform = `translateX(${-(idxRef.current * width()) + swipe.current.dx}px)`
   }
 
-  useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKey)
-    return () => {
-      document.body.style.overflow = prev
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [onClose])
+  function applyZoom(animate = false) {
+    const el = imgRefs.current[idxRef.current]
+    if (!el) return
+    el.style.transition = animate ? 'transform .25s ease' : 'none'
+    el.style.transform = `translate(${zoom.current.tx}px, ${zoom.current.ty}px) scale(${zoom.current.scale})`
+    el.style.zIndex = zoom.current.scale > 1 ? '20' : '0'
+  }
 
-  const pts = () => Array.from(pointers.current.values())
-  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-    Math.hypot(a.x - b.x, a.y - b.y)
+  function resetZoom() {
+    zoom.current = { scale: 1, tx: 0, ty: 0 }
+    applyZoom(true)
+  }
 
   function onDown(e: React.PointerEvent) {
     ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+    if (pointers.current.size === 0) widthRef.current = viewportRef.current?.clientWidth || 0
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
     if (pointers.current.size === 2) {
+      everPinched.current = true
       const [a, b] = pts()
-      pinch.current = { dist: dist(a, b) || 1, scale: view.current.scale }
-      pan.current = null
+      const m = mid(a, b)
+      pinch.current = { dist: dist(a, b) || 1, scale: zoom.current.scale, midX: m.x, midY: m.y, tx: zoom.current.tx, ty: zoom.current.ty }
+      swipe.current.dx = 0
+      applyTrack(true)
     } else if (pointers.current.size === 1) {
-      pan.current = { x: e.clientX, y: e.clientY, tx: view.current.tx, ty: view.current.ty }
+      const p = pts()[0]
+      if (zoom.current.scale > 1) {
+        pan.current = { x: p.x, y: p.y, tx: zoom.current.tx, ty: zoom.current.ty }
+      } else {
+        swipe.current = { startX: p.x, dx: 0 }
+      }
     }
   }
 
   function onMove(e: React.PointerEvent) {
     if (!pointers.current.has(e.pointerId)) return
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-    if (pointers.current.size >= 2 && pinch.current) {
+
+    if (pointers.current.size >= 2) {
       const [a, b] = pts()
-      view.current.scale = Math.min(5, Math.max(1, pinch.current.scale * (dist(a, b) / pinch.current.dist)))
-      apply()
-    } else if (pointers.current.size === 1 && pan.current && view.current.scale > 1) {
-      view.current.tx = pan.current.tx + (e.clientX - pan.current.x)
-      view.current.ty = pan.current.ty + (e.clientY - pan.current.y)
-      apply()
+      const m = mid(a, b)
+      zoom.current.scale = Math.min(4, Math.max(1, pinch.current.scale * (dist(a, b) / pinch.current.dist)))
+      zoom.current.tx = pinch.current.tx + (m.x - pinch.current.midX)
+      zoom.current.ty = pinch.current.ty + (m.y - pinch.current.midY)
+      applyZoom()
+    } else if (pointers.current.size === 1) {
+      const p = pts()[0]
+      if (zoom.current.scale > 1) {
+        zoom.current.tx = pan.current.tx + (p.x - pan.current.x)
+        zoom.current.ty = pan.current.ty + (p.y - pan.current.y)
+        applyZoom()
+      } else if (!everPinched.current) {
+        let dx = p.x - swipe.current.startX
+        const atStart = idxRef.current === 0 && dx > 0
+        const atEnd = idxRef.current === images.length - 1 && dx < 0
+        if (atStart || atEnd) dx *= 0.35 // rubber-band at the edges
+        swipe.current.dx = dx
+        applyTrack(false)
+      }
     }
   }
 
   function onUp(e: React.PointerEvent) {
     pointers.current.delete(e.pointerId)
-    pinch.current = null
-    pan.current = null
-    if (view.current.scale <= 1) {
-      view.current = { scale: 1, tx: 0, ty: 0 }
-      const el = imgRef.current
-      if (el) {
-        el.style.transition = 'transform .25s ease'
-        apply()
-        setTimeout(() => el && (el.style.transition = 'none'), 260)
+
+    if (pointers.current.size === 0) {
+      if (zoom.current.scale > 1.02 || (everPinched.current && zoom.current.scale > 1)) {
+        resetZoom() // release pinch -> spring back (peek zoom)
+      } else if (!everPinched.current) {
+        const threshold = width() * 0.18
+        let n = idxRef.current
+        if (swipe.current.dx < -threshold && n < images.length - 1) n++
+        else if (swipe.current.dx > threshold && n > 0) n--
+        swipe.current.dx = 0
+        if (n !== idxRef.current) {
+          buzz(8)
+          idxRef.current = n
+          setIdx(n)
+          onPhotoChange(n)
+        }
+        applyTrack(true)
+      } else {
+        resetZoom()
       }
+      everPinched.current = false
+    } else if (pointers.current.size === 1 && zoom.current.scale > 1) {
+      const p = pts()[0]
+      pan.current = { x: p.x, y: p.y, tx: zoom.current.tx, ty: zoom.current.ty }
     }
   }
 
+  function goTo(i: number) {
+    widthRef.current = viewportRef.current?.clientWidth || 0
+    idxRef.current = i
+    setIdx(i)
+    onPhotoChange(i)
+    applyTrack(true)
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black">
-      <div className="flex justify-end p-3" style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
-        <button type="button" onClick={onClose} aria-label="Fermer" className="rounded-full bg-white/15 p-2 text-white active:scale-90">
-          <CloseIcon />
-        </button>
-      </div>
+    <>
       <div
-        className="flex flex-1 touch-none select-none items-center justify-center overflow-hidden"
+        ref={viewportRef}
+        className="relative min-h-0 flex-1 touch-none select-none overflow-hidden"
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerCancel={onUp}
-        onDoubleClick={() => {
-          view.current = view.current.scale > 1 ? { scale: 1, tx: 0, ty: 0 } : { scale: 2.5, tx: 0, ty: 0 }
-          apply()
-        }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          ref={imgRef}
-          src={src}
-          alt=""
-          draggable={false}
-          className="max-h-full max-w-full object-contain will-change-transform"
-          style={{ transformOrigin: 'center', pointerEvents: 'none' }}
-        />
+        <div ref={trackRef} className="flex h-full">
+          {images.map((src, i) => (
+            <Slide
+              key={i}
+              src={src}
+              number={i + 1}
+              imgRef={(el) => {
+                imgRefs.current[i] = el
+              }}
+            />
+          ))}
+        </div>
       </div>
-      <p className="pb-6 pt-2 text-center text-xs text-white/50">Pince pour zoomer · tape pour fermer</p>
-    </div>
-  )
-}
 
-/* ---------- one swipe slide ---------- */
-
-function PhotoSlide({ src, number, onOpen }: { src: string; number: number; onOpen: () => void }) {
-  const [loaded, setLoaded] = useState(false)
-  const imgRef = useRef<HTMLImageElement>(null)
-
-  useEffect(() => {
-    if (imgRef.current?.complete) setLoaded(true)
-  }, [src])
-
-  return (
-    <div className="flex h-full shrink-0 basis-full snap-center items-center justify-center p-3">
-      <button type="button" onClick={onOpen} className="relative flex h-full w-full items-center justify-center">
-        {!loaded && <div className="absolute inset-8 animate-pulse rounded-3xl bg-white/10" />}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          ref={imgRef}
-          src={src}
-          alt={`Photo ${number}`}
-          draggable={false}
-          onLoad={() => setLoaded(true)}
-          className={`max-h-full max-w-full rounded-3xl object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
-        />
-        <span className="pointer-events-none absolute left-4 top-4 flex h-9 min-w-9 items-center justify-center rounded-full bg-black/55 px-2.5 text-base font-bold text-white backdrop-blur">
-          {number}
-        </span>
-      </button>
-    </div>
+      {images.length > 1 && (
+        <div className="flex justify-center gap-1.5 py-2.5">
+          {images.map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              aria-label={`Photo ${i + 1}`}
+              onClick={() => goTo(i)}
+              className={`h-2 rounded-full transition-all ${i === idx ? 'w-6 bg-white' : 'w-2 bg-white/35'}`}
+            />
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 
@@ -187,9 +253,7 @@ function PhotoSlide({ src, number, onOpen }: { src: string; number: number; onOp
 export default function Voter({ testId, series }: { testId: string; series: Series[] }) {
   const [index, setIndex] = useState(0)
   const [photo, setPhoto] = useState(0)
-  const [zoomSrc, setZoomSrc] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const scrollerRef = useRef<HTMLDivElement>(null)
 
   async function sendVote(seriesId: string, imageIndex: number) {
     try {
@@ -212,17 +276,6 @@ export default function Voter({ testId, series }: { testId: string; series: Seri
     } catch {
       setError('Connexion impossible — vérifie ta connexion.')
     }
-  }
-
-  function onScroll(e: React.UIEvent<HTMLDivElement>) {
-    const el = e.currentTarget
-    const i = Math.round(el.scrollLeft / el.clientWidth)
-    if (i !== photo) setPhoto(i)
-  }
-
-  function goToPhoto(i: number) {
-    const el = scrollerRef.current
-    if (el) el.scrollTo({ left: i * el.clientWidth, behavior: 'smooth' })
   }
 
   function choose() {
@@ -278,35 +331,11 @@ export default function Voter({ testId, series }: { testId: string; series: Seri
         ) : (
           <span className="h-9 w-9" />
         )}
-        <p className="text-[13px] font-medium text-white/55">Swipe pour comparer · tape pour agrandir</p>
+        <p className="text-[13px] font-medium text-white/55">Swipe pour comparer · pince pour zoomer</p>
       </div>
 
-      {/* swipeable photos */}
-      <div
-        ref={scrollerRef}
-        key={`series-${index}`}
-        onScroll={onScroll}
-        className="flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {current.images.map((src, i) => (
-          <PhotoSlide key={i} src={src} number={i + 1} onOpen={() => setZoomSrc(src)} />
-        ))}
-      </div>
-
-      {/* dots */}
-      {current.images.length > 1 && (
-        <div className="flex justify-center gap-1.5 py-2.5">
-          {current.images.map((_, i) => (
-            <button
-              key={i}
-              type="button"
-              aria-label={`Photo ${i + 1}`}
-              onClick={() => goToPhoto(i)}
-              className={`h-2 rounded-full transition-all ${i === photo ? 'w-6 bg-white' : 'w-2 bg-white/35'}`}
-            />
-          ))}
-        </div>
-      )}
+      {/* gesture carousel */}
+      <Carousel key={`series-${index}`} images={current.images} onPhotoChange={setPhoto} />
 
       {error && (
         <p className="mx-4 mb-1 rounded-xl bg-red-500/15 px-3 py-2 text-center text-sm text-red-300">{error}</p>
@@ -322,8 +351,6 @@ export default function Voter({ testId, series }: { testId: string; series: Seri
           <CheckIcon /> Choisir la photo {photo + 1}
         </button>
       </div>
-
-      {zoomSrc && <ZoomModal src={zoomSrc} onClose={() => setZoomSrc(null)} />}
     </div>
   )
 }
