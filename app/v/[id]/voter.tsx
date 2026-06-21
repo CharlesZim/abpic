@@ -55,8 +55,8 @@ function Slide({
   }, [src])
 
   return (
-    <div className="relative flex h-full w-full shrink-0 items-center justify-center p-3">
-      {!loaded && <div className="absolute inset-8 animate-pulse rounded-3xl bg-white/10" />}
+    <div className="relative flex h-full w-full shrink-0 items-center justify-center">
+      {!loaded && <div className="absolute inset-6 animate-pulse rounded-2xl bg-white/10" />}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={(el) => {
@@ -67,12 +67,9 @@ function Slide({
         alt={`Photo ${number}`}
         draggable={false}
         onLoad={() => setLoaded(true)}
-        className={`max-h-full max-w-full rounded-3xl object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+        className={`max-h-full max-w-full object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
         style={{ pointerEvents: 'none', transformOrigin: 'center', willChange: 'transform' }}
       />
-      <span className="pointer-events-none absolute left-4 top-4 flex h-9 min-w-9 items-center justify-center rounded-full bg-black/55 px-2.5 text-base font-bold text-white backdrop-blur">
-        {number}
-      </span>
     </div>
   )
 }
@@ -103,7 +100,7 @@ function Carousel({ images, onPhotoChange }: { images: string[]; onPhotoChange: 
   function applyTrack(animate = false) {
     const el = trackRef.current
     if (!el) return
-    el.style.transition = animate ? 'transform .28s cubic-bezier(.22,.61,.36,1)' : 'none'
+    el.style.transition = animate ? 'transform .34s cubic-bezier(.25,.46,.45,.94)' : 'none'
     el.style.transform = `translateX(${-(idxRef.current * width()) + swipe.current.dx}px)`
   }
 
@@ -163,7 +160,8 @@ function Carousel({ images, onPhotoChange }: { images: string[]; onPhotoChange: 
         let dx = p.x - swipe.current.startX
         const atStart = idxRef.current === 0 && dx > 0
         const atEnd = idxRef.current === images.length - 1 && dx < 0
-        if (atStart || atEnd) dx *= 0.35 // rubber-band at the edges
+        if (atStart || atEnd) dx *= 0.3 // rubber-band at the edges
+        else dx *= 0.85 // a touch of damping so it feels less twitchy
         swipe.current.dx = dx
         applyTrack(false)
       }
@@ -174,10 +172,10 @@ function Carousel({ images, onPhotoChange }: { images: string[]; onPhotoChange: 
     pointers.current.delete(e.pointerId)
 
     if (pointers.current.size === 0) {
-      if (zoom.current.scale > 1.02 || (everPinched.current && zoom.current.scale > 1)) {
+      if (everPinched.current || zoom.current.scale > 1) {
         resetZoom() // release pinch -> spring back (peek zoom)
-      } else if (!everPinched.current) {
-        const threshold = width() * 0.18
+      } else {
+        const threshold = width() * 0.3 // less sensitive: needs a deliberate swipe
         let n = idxRef.current
         if (swipe.current.dx < -threshold && n < images.length - 1) n++
         else if (swipe.current.dx > threshold && n > 0) n--
@@ -189,8 +187,6 @@ function Carousel({ images, onPhotoChange }: { images: string[]; onPhotoChange: 
           onPhotoChange(n)
         }
         applyTrack(true)
-      } else {
-        resetZoom()
       }
       everPinched.current = false
     } else if (pointers.current.size === 1 && zoom.current.scale > 1) {
@@ -211,7 +207,7 @@ function Carousel({ images, onPhotoChange }: { images: string[]; onPhotoChange: 
     <>
       <div
         ref={viewportRef}
-        className="relative min-h-0 flex-1 touch-none select-none overflow-hidden"
+        className="absolute inset-0 touch-none select-none overflow-hidden"
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
@@ -232,14 +228,17 @@ function Carousel({ images, onPhotoChange }: { images: string[]; onPhotoChange: 
       </div>
 
       {images.length > 1 && (
-        <div className="flex justify-center gap-1.5 py-2.5">
+        <div
+          className="pointer-events-none absolute inset-x-0 flex justify-center gap-1.5"
+          style={{ bottom: 'calc(env(safe-area-inset-bottom) + 92px)' }}
+        >
           {images.map((_, i) => (
             <button
               key={i}
               type="button"
               aria-label={`Photo ${i + 1}`}
               onClick={() => goTo(i)}
-              className={`h-2 rounded-full transition-all ${i === idx ? 'w-6 bg-white' : 'w-2 bg-white/35'}`}
+              className={`pointer-events-auto h-2 rounded-full transition-all ${i === idx ? 'w-6 bg-white' : 'w-2 bg-white/40'}`}
             />
           ))}
         </div>
@@ -309,44 +308,43 @@ export default function Voter({ testId, series }: { testId: string; series: Seri
   const current = series[index]
 
   return (
-    <div
-      className="fixed inset-0 flex select-none flex-col bg-black text-white"
-      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
-    >
-      {/* story progress */}
-      <div className="flex gap-1.5 px-3 pt-3">
-        {series.map((s, i) => (
-          <div key={s.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/25">
-            <div className={`h-full rounded-full bg-white transition-all duration-300 ${i <= index ? 'w-full' : 'w-0'}`} />
-          </div>
-        ))}
-      </div>
-
-      {/* back + context */}
-      <div className="flex items-center gap-3 px-3 pb-1 pt-3">
-        {index > 0 ? (
-          <button type="button" onClick={back} aria-label="Précédent" className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 active:scale-90">
-            <ChevronLeftIcon />
-          </button>
-        ) : (
-          <span className="h-9 w-9" />
-        )}
-        <p className="text-[13px] font-medium text-white/55">Swipe pour comparer · pince pour zoomer</p>
-      </div>
-
-      {/* gesture carousel */}
+    <div className="fixed inset-0 select-none overflow-hidden bg-black text-white">
+      {/* fullscreen gesture carousel */}
       <Carousel key={`series-${index}`} images={current.images} onPhotoChange={setPhoto} />
 
-      {error && (
-        <p className="mx-4 mb-1 rounded-xl bg-red-500/15 px-3 py-2 text-center text-sm text-red-300">{error}</p>
-      )}
+      {/* top overlay: progress + back, floating over the photo */}
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-black/45 to-transparent pb-10"
+        style={{ paddingTop: 'env(safe-area-inset-top)' }}
+      >
+        <div className="flex gap-1.5 px-3 pt-3">
+          {series.map((s, i) => (
+            <div key={s.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/25">
+              <div className={`h-full rounded-full bg-white transition-all duration-300 ${i <= index ? 'w-full' : 'w-0'}`} />
+            </div>
+          ))}
+        </div>
+        {index > 0 && (
+          <div className="px-3 pt-3">
+            <button type="button" onClick={back} aria-label="Précédent" className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-black/40 backdrop-blur active:scale-90">
+              <ChevronLeftIcon />
+            </button>
+          </div>
+        )}
+      </div>
 
-      {/* choose */}
-      <div className="px-4 pb-4 pt-1">
+      {/* bottom overlay: choose button, floating over the photo */}
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 pt-12"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
+      >
+        {error && (
+          <p className="mb-2 rounded-xl bg-red-500/20 px-3 py-2 text-center text-sm text-red-200">{error}</p>
+        )}
         <button
           type="button"
           onClick={choose}
-          className="flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 py-4 text-base font-bold text-white shadow-lg shadow-fuchsia-500/25 transition active:scale-[0.98]"
+          className="pointer-events-auto flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 py-4 text-base font-bold text-white shadow-lg shadow-fuchsia-500/25 transition active:scale-[0.98]"
         >
           <CheckIcon /> Choisir la photo {photo + 1}
         </button>
