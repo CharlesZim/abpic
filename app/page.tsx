@@ -176,8 +176,8 @@ export default function Home() {
       }
       setResultId(data.id)
       setResultsToken(data.resultsToken)
-    } catch {
-      setError('Impossible de créer le test. Réessaie.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Impossible de créer le test. Réessaie.')
     } finally {
       setSubmitting(false)
     }

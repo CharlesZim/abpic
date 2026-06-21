@@ -164,7 +164,7 @@ export async function POST(request: Request) {
     if (failed) {
       console.error('[api/create] upload failed:', failed.error)
       return Response.json(
-        { error: 'Could not upload photos. Please try again.' },
+        { error: `Upload: ${failed.error.message}` },
         { status: 500 }
       )
     }
@@ -189,7 +189,7 @@ export async function POST(request: Request) {
     if (insertError) {
       console.error('[api/create] insert failed:', insertError)
       return Response.json(
-        { error: 'Could not create test. Please try again.' },
+        { error: `Insert: ${insertError.message}` },
         { status: 500 }
       )
     }
@@ -198,7 +198,7 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error('[api/create] failed:', err)
     return Response.json(
-      { error: 'Something went wrong. Please try again.' },
+      { error: err instanceof Error ? err.message : 'Unexpected server error' },
       { status: 500 }
     )
   }
