@@ -180,11 +180,14 @@ function Carousel({
     if (pointers.current.size >= 2) {
       const [a, b] = pts()
       const m = mid(a, b)
-      zoom.current.scale = Math.min(4, Math.max(1, pinch.current.scale * (dist(a, b) / pinch.current.dist)))
+      // Dampen the pinch so the zoom is less sensitive.
+      const ratio = dist(a, b) / pinch.current.dist
+      const damped = 1 + (ratio - 1) * 0.55
+      zoom.current.scale = Math.min(4, Math.max(1, pinch.current.scale * damped))
       zoom.current.tx = pinch.current.tx + (m.x - pinch.current.midX)
       zoom.current.ty = pinch.current.ty + (m.y - pinch.current.midY)
       applyZoom()
-      if (zoom.current.scale > 1.02) setZoomActive(true)
+      if (zoom.current.scale > 1.04) setZoomActive(true)
     } else if (pointers.current.size === 1) {
       const p = pts()[0]
       if (zoom.current.scale > 1) {
@@ -353,19 +356,21 @@ export default function Voter({ testId, series }: { testId: string; series: Seri
 
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden bg-black text-white">
-      {/* thin top bar: progress only */}
-      <div
-        className={`px-3 transition-opacity duration-200 ${zoomed ? 'opacity-0' : 'opacity-100'}`}
-        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)', paddingBottom: '8px' }}
-      >
-        <div className="flex gap-1.5">
-          {series.map((s, i) => (
-            <div key={s.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/25">
-              <div className={`h-full rounded-full bg-white transition-all duration-300 ${i <= index ? 'w-full' : 'w-0'}`} />
-            </div>
-          ))}
+      {/* thin top bar: progress — only useful with more than one series */}
+      {series.length > 1 && (
+        <div
+          className={`px-3 transition-opacity duration-200 ${zoomed ? 'opacity-0' : 'opacity-100'}`}
+          style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)', paddingBottom: '8px' }}
+        >
+          <div className="flex gap-1.5">
+            {series.map((s, i) => (
+              <div key={s.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/25">
+                <div className={`h-full rounded-full bg-white transition-all duration-300 ${i <= index ? 'w-full' : 'w-0'}`} />
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* photo area (bounded: stops above the button) */}
       <div className="relative min-h-0 flex-1">
