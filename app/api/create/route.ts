@@ -161,7 +161,7 @@ export async function POST(request: Request) {
 
     const uploadResults = await Promise.all(uploads)
     const failed = uploadResults.find((r) => r.error)
-    if (failed) {
+    if (failed?.error) {
       console.error('[api/create] upload failed:', failed.error)
       return Response.json(
         { error: `Upload: ${failed.error.message}` },
