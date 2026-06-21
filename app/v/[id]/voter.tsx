@@ -111,7 +111,8 @@ function Carousel({
   const pointers = useRef(new Map<number, { x: number; y: number }>())
   const everPinched = useRef(false)
   const zoomedRef = useRef(false)
-  const swipe = useRef({ startX: 0, dx: 0 })
+  const swipe = useRef({ startX: 0, dx: 0, raw: 0 })
+  const vel = useRef({ x: 0, t: 0, v: 0 })
   const pinch = useRef({ dist: 0, scale: 1, midX: 0, midY: 0, tx: 0, ty: 0 })
   const pan = useRef({ x: 0, y: 0, tx: 0, ty: 0 })
   const zoom = useRef({ scale: 1, tx: 0, ty: 0 })
@@ -166,7 +167,8 @@ function Carousel({
       if (zoom.current.scale > 1) {
         pan.current = { x: p.x, y: p.y, tx: zoom.current.tx, ty: zoom.current.ty }
       } else {
-        swipe.current = { startX: p.x, dx: 0 }
+        swipe.current = { startX: p.x, dx: 0, raw: 0 }
+        vel.current = { x: p.x, t: e.timeStamp, v: 0 }
       }
     }
   }
@@ -190,12 +192,15 @@ function Carousel({
         zoom.current.ty = pan.current.ty + (p.y - pan.current.y)
         applyZoom()
       } else if (!everPinched.current) {
-        let dx = p.x - swipe.current.startX
-        const atStart = idxRef.current === 0 && dx > 0
-        const atEnd = idxRef.current === images.length - 1 && dx < 0
-        if (atStart || atEnd) dx *= 0.3 // rubber-band at the edges
-        else dx *= 0.85 // a touch of damping so it feels less twitchy
-        swipe.current.dx = dx
+        const raw = p.x - swipe.current.startX
+        const atStart = idxRef.current === 0 && raw > 0
+        const atEnd = idxRef.current === images.length - 1 && raw < 0
+        swipe.current.raw = raw
+        swipe.current.dx = atStart || atEnd ? raw * 0.3 : raw // rubber-band at edges
+        const dt = e.timeStamp - vel.current.t
+        if (dt > 0) vel.current.v = (p.x - vel.current.x) / dt
+        vel.current.x = p.x
+        vel.current.t = e.timeStamp
         applyTrack(false)
       }
     }
@@ -208,11 +213,15 @@ function Carousel({
       if (everPinched.current || zoom.current.scale > 1) {
         resetZoom() // release pinch -> spring back, UI fades in
       } else {
-        const threshold = width() * 0.3 // less sensitive: needs a deliberate swipe
+        const threshold = width() * 0.2
+        const flick = Math.abs(vel.current.v) > 0.35 // px/ms
         let n = idxRef.current
-        if (swipe.current.dx < -threshold && n < images.length - 1) n++
-        else if (swipe.current.dx > threshold && n > 0) n--
+        const goNext = swipe.current.raw < -threshold || (flick && vel.current.v < 0)
+        const goPrev = swipe.current.raw > threshold || (flick && vel.current.v > 0)
+        if (goNext && n < images.length - 1) n++
+        else if (goPrev && n > 0) n--
         swipe.current.dx = 0
+        swipe.current.raw = 0
         if (n !== idxRef.current) {
           buzz(8)
           idxRef.current = n

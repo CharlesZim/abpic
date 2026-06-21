@@ -41,14 +41,41 @@ async function mapLimit<T, R>(
       results[i] = await fn(items[i], i)
     }
   }
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, worker)
-  )
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
   return results
 }
 
 function emptySeries(): Series {
   return { id: newId(), photos: [] }
+}
+
+/* ---------- icons ---------- */
+
+function PlusIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  )
+}
+
+function ShareIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
+      <polyline points="16 6 12 2 8 6" />
+      <line x1="12" y1="2" x2="12" y2="15" />
+    </svg>
+  )
+}
+
+function CheckIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
 }
 
 export default function Home() {
@@ -61,9 +88,7 @@ export default function Home() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
   function addSeries() {
-    setSeries((prev) =>
-      prev.length >= MAX_SERIES ? prev : [...prev, emptySeries()]
-    )
+    setSeries((prev) => (prev.length >= MAX_SERIES ? prev : [...prev, emptySeries()]))
   }
 
   function removeSeries(seriesId: string) {
@@ -105,12 +130,12 @@ export default function Home() {
 
   function validate(): string | null {
     if (series.length < MIN_SERIES || series.length > MAX_SERIES) {
-      return `Add ${MIN_SERIES} to ${MAX_SERIES} series.`
+      return `Ajoute ${MIN_SERIES} à ${MAX_SERIES} séries.`
     }
     for (let i = 0; i < series.length; i++) {
       const count = series[i].photos.length
       if (count < MIN_PHOTOS || count > MAX_PHOTOS) {
-        return `Series ${i + 1} needs ${MIN_PHOTOS} to ${MAX_PHOTOS} photos.`
+        return `Chaque série doit contenir entre ${MIN_PHOTOS} et ${MAX_PHOTOS} photos.`
       }
     }
     return null
@@ -131,9 +156,7 @@ export default function Home() {
       formData.append('seriesOrder', JSON.stringify(series.map((s) => s.id)))
 
       // Compress photos in parallel (capped) instead of one-by-one.
-      const items = series.flatMap((s) =>
-        s.photos.map((photo) => ({ seriesId: s.id, photo }))
-      )
+      const items = series.flatMap((s) => s.photos.map((photo) => ({ seriesId: s.id, photo })))
       const compressed = await mapLimit(items, 4, async ({ photo }) => {
         try {
           return await imageCompression(photo.file, COMPRESSION_OPTIONS)
@@ -153,12 +176,14 @@ export default function Home() {
       }
       setResultId(data.id)
       setResultsToken(data.resultsToken)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong')
+    } catch {
+      setError('Impossible de créer le test. Réessaie.')
     } finally {
       setSubmitting(false)
     }
   }
+
+  /* ---------- success screen ---------- */
 
   if (resultId) {
     const origin = typeof window !== 'undefined' ? window.location.origin : ''
@@ -171,45 +196,68 @@ export default function Home() {
       setTimeout(() => setCopiedKey(null), 2000)
     }
 
+    async function share() {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        try {
+          await navigator.share({
+            title: 'Aide-moi à choisir 📸',
+            text: 'Quelle photo je poste ? Vote pour ta préférée 👇',
+            url: shareLink,
+          })
+        } catch {
+          // user dismissed the share sheet
+        }
+      } else {
+        copy('share', shareLink)
+      }
+    }
+
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-md flex-col gap-6 p-6">
-        <h1 className="text-2xl font-bold">Test created</h1>
-
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">Share this link to collect votes</p>
-          <code className="break-all rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-            {shareLink}
-          </code>
-          <button
-            type="button"
-            onClick={() => copy('share', shareLink)}
-            className="rounded-lg bg-black px-4 py-3 font-medium text-white dark:bg-white dark:text-black"
-          >
-            {copiedKey === 'share' ? 'Copied!' : 'Copy voting link'}
-          </button>
+        <div className="mt-6 flex flex-col items-center gap-3 text-center">
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600 text-white">
+            <CheckIcon size={32} />
+          </span>
+          <h1 className="text-2xl font-extrabold tracking-tight">Ton test est prêt !</h1>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Envoie le lien à tes amis pour qu’ils votent.
+          </p>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">
-            Your results link — keep this to check results later
+        <button
+          type="button"
+          onClick={share}
+          className="flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 py-4 text-base font-bold text-white shadow-lg shadow-fuchsia-500/25 transition active:scale-[0.98]"
+        >
+          <ShareIcon /> Partager le lien
+        </button>
+        <button
+          type="button"
+          onClick={() => copy('share', shareLink)}
+          className="-mt-3 text-center text-sm font-medium text-zinc-500"
+        >
+          {copiedKey === 'share' ? 'Lien copié ✓' : 'ou copier le lien'}
+        </button>
+
+        <div className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
+          <p className="text-sm font-semibold">Tes résultats</p>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+            Garde ce lien pour suivre les votes (à toi seul).
           </p>
-          <code className="break-all rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-            {resultsLink}
-          </code>
-          <div className="flex gap-2">
+          <div className="mt-3 flex gap-2">
+            <a
+              href={resultsLink}
+              className="flex-1 rounded-xl bg-zinc-900 py-3 text-center text-sm font-semibold text-white dark:bg-white dark:text-black"
+            >
+              Voir les résultats
+            </a>
             <button
               type="button"
               onClick={() => copy('results', resultsLink)}
-              className="flex-1 rounded-lg border border-zinc-300 px-4 py-3 font-medium dark:border-zinc-600"
+              className="rounded-xl border border-zinc-300 px-4 text-sm font-medium dark:border-zinc-700"
             >
-              {copiedKey === 'results' ? 'Copied!' : 'Copy results link'}
+              {copiedKey === 'results' ? 'Copié ✓' : 'Copier'}
             </button>
-            <a
-              href={resultsLink}
-              className="flex-1 rounded-lg border border-zinc-300 px-4 py-3 text-center font-medium dark:border-zinc-600"
-            >
-              View results
-            </a>
           </div>
         </div>
 
@@ -220,43 +268,49 @@ export default function Home() {
             setResultsToken(null)
             setSeries([emptySeries()])
           }}
-          className="text-sm text-zinc-500 underline"
+          className="text-center text-sm text-zinc-500 underline"
         >
-          Create another test
+          Créer un autre test
         </button>
       </main>
     )
   }
 
+  /* ---------- builder ---------- */
+
+  const totalPhotos = series.reduce((n, s) => n + s.photos.length, 0)
+
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col gap-6 p-6">
-      <header>
-        <h1 className="text-2xl font-bold">AB Photo MVP</h1>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Add 1–5 series of 2–5 photos, pick how long the test runs, then create it.
-        </p>
-      </header>
+    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col">
+      <div className="flex-1 space-y-6 p-5">
+        <header className="space-y-1 pt-2">
+          <h1 className="text-[26px] font-extrabold tracking-tight">Quelle photo je poste ?</h1>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Ajoute tes photos, tes amis votent pour la meilleure.
+          </p>
+        </header>
 
-      <div className="flex flex-col gap-6">
-        {series.map((s, i) => (
-          <section
-            key={s.id}
-            className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700"
-          >
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold">Series {i + 1}</h2>
-              {series.length > MIN_SERIES && (
-                <button
-                  type="button"
-                  onClick={() => removeSeries(s.id)}
-                  className="text-sm text-red-600"
-                >
-                  Remove
-                </button>
-              )}
-            </div>
+        <div className="space-y-4">
+          {series.map((s, i) => (
+            <section
+              key={s.id}
+              className="rounded-3xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900/40"
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-bold">
+                  {series.length > 1 ? `Série ${i + 1}` : 'Tes photos'}
+                </h2>
+                {series.length > MIN_SERIES && (
+                  <button
+                    type="button"
+                    onClick={() => removeSeries(s.id)}
+                    className="text-xs font-medium text-zinc-400 hover:text-red-500"
+                  >
+                    Supprimer
+                  </button>
+                )}
+              </div>
 
-            {s.photos.length > 0 && (
               <div className="grid grid-cols-3 gap-2">
                 {s.photos.map((photo) => (
                   <div key={photo.id} className="relative aspect-square">
@@ -264,84 +318,89 @@ export default function Home() {
                     <img
                       src={photo.preview}
                       alt=""
-                      className="h-full w-full rounded-lg object-cover"
+                      className="h-full w-full rounded-xl object-cover"
                     />
                     <button
                       type="button"
                       onClick={() => removePhoto(s.id, photo.id)}
-                      aria-label="Remove photo"
-                      className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-xs text-white"
+                      aria-label="Retirer la photo"
+                      className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs text-white backdrop-blur active:scale-90"
                     >
                       ✕
                     </button>
                   </div>
                 ))}
+
+                {s.photos.length < MAX_PHOTOS && (
+                  <label className="flex aspect-square cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-zinc-300 text-zinc-400 transition active:scale-95 dark:border-zinc-700">
+                    <PlusIcon />
+                    <span className="text-[11px] font-medium">Ajouter</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        addPhotos(s.id, e.target.files)
+                        e.target.value = ''
+                      }}
+                    />
+                  </label>
+                )}
               </div>
-            )}
 
-            <p className="text-xs text-zinc-500">
-              {s.photos.length} / {MAX_PHOTOS} photos
-            </p>
-
-            {s.photos.length < MAX_PHOTOS && (
-              <label className="cursor-pointer rounded-lg border border-dashed border-zinc-300 p-3 text-center text-sm text-zinc-600 dark:border-zinc-600 dark:text-zinc-400">
-                Add photos
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    addPhotos(s.id, e.target.files)
-                    e.target.value = ''
-                  }}
-                />
-              </label>
-            )}
-          </section>
-        ))}
-      </div>
-
-      {series.length < MAX_SERIES && (
-        <button
-          type="button"
-          onClick={addSeries}
-          className="rounded-lg border border-zinc-300 px-4 py-3 font-medium dark:border-zinc-600"
-        >
-          + Add series
-        </button>
-      )}
-
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">Duration</span>
-        <div className="flex flex-wrap gap-2">
-          {DURATIONS.map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => setDuration(d)}
-              className={`rounded-lg border px-4 py-2 text-sm ${
-                duration === d
-                  ? 'border-black bg-black text-white dark:border-white dark:bg-white dark:text-black'
-                  : 'border-zinc-300 dark:border-zinc-600'
-              }`}
-            >
-              {d}
-            </button>
+              <p className="mt-2.5 text-xs text-zinc-400">
+                {s.photos.length}/{MAX_PHOTOS} photos · min. {MIN_PHOTOS}
+              </p>
+            </section>
           ))}
+        </div>
+
+        {series.length < MAX_SERIES && (
+          <button
+            type="button"
+            onClick={addSeries}
+            className="w-full rounded-2xl border border-dashed border-zinc-300 py-3 text-sm font-medium text-zinc-500 active:scale-[0.99] dark:border-zinc-700"
+          >
+            + Ajouter une autre série
+          </button>
+        )}
+
+        <div>
+          <p className="mb-2 text-sm font-semibold">Durée du vote</p>
+          <div className="flex flex-wrap gap-2">
+            {DURATIONS.map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setDuration(d)}
+                className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                  duration === d
+                    ? 'border-transparent bg-zinc-900 text-white dark:bg-white dark:text-black'
+                    : 'border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300'
+                }`}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      <button
-        type="button"
-        onClick={handleSubmit}
-        disabled={submitting}
-        className="rounded-lg bg-black px-4 py-3 font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
+      <div
+        className="sticky bottom-0 border-t border-zinc-200 bg-white/85 px-5 pt-3 backdrop-blur dark:border-zinc-800 dark:bg-black/80"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 14px)' }}
       >
-        {submitting ? 'Création…' : 'Create test'}
-      </button>
+        {error && <p className="mb-2 text-center text-sm text-red-600">{error}</p>}
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={submitting || totalPhotos === 0}
+          className="flex w-full items-center justify-center rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 py-4 text-base font-bold text-white shadow-lg shadow-fuchsia-500/25 transition active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
+        >
+          {submitting ? 'Création…' : 'Créer le test'}
+        </button>
+      </div>
     </main>
   )
 }
