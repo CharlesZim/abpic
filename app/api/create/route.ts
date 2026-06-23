@@ -184,20 +184,22 @@ export async function POST(request: Request) {
 
     const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
 
-    const { error: insertError } = await supabase.from('tests').insert({
-      id: testId,
-      series,
-      expires_at: expiresAt,
-      results_token: resultsToken,
-      creator_name: creatorName,
-    })
+    const baseRow = { id: testId, series, expires_at: expiresAt, results_token: resultsToken }
+
+    let { error: insertError } = await supabase
+      .from('tests')
+      .insert({ ...baseRow, creator_name: creatorName })
+
+    // The creator_name column may not exist yet — fall back to inserting
+    // without it so creation never hard-fails on a missing optional column.
+    if (insertError) {
+      console.error('[api/create] insert failed (retry without creator_name):', insertError)
+      ;({ error: insertError } = await supabase.from('tests').insert(baseRow))
+    }
 
     if (insertError) {
       console.error('[api/create] insert failed:', insertError)
-      return Response.json(
-        { error: 'Impossible de créer le test. Réessaie.' },
-        { status: 500 }
-      )
+      return Response.json({ error: `DB: ${insertError.message}` }, { status: 500 })
     }
 
     return Response.json({ id: testId, resultsToken })
