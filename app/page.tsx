@@ -3,6 +3,8 @@
 import imageCompression from 'browser-image-compression'
 import { useState } from 'react'
 
+import { Wordmark } from '@/app/_components/wordmark'
+
 type Photo = { id: string; file: File; preview: string }
 type Series = { id: string; photos: Photo[] }
 
@@ -45,6 +47,23 @@ async function mapLimit<T, R>(
   return results
 }
 
+// iPhones often hand us HEIC/HEIF; convert to JPEG so every browser can show
+// and every server can process the photo.
+async function toUploadable(file: File): Promise<File> {
+  const isHeic = /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name)
+  if (!isHeic) return file
+  try {
+    const heic2any = (await import('heic2any')).default
+    const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 })
+    const blob = Array.isArray(out) ? out[0] : out
+    return new File([blob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), {
+      type: 'image/jpeg',
+    })
+  } catch {
+    return file
+  }
+}
+
 function emptySeries(): Series {
   return { id: newId(), photos: [] }
 }
@@ -78,9 +97,17 @@ function CheckIcon({ size = 18 }: { size?: number }) {
   )
 }
 
+function Spinner() {
+  return (
+    <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />
+  )
+}
+
 export default function Home() {
+  const [name, setName] = useState('')
   const [series, setSeries] = useState<Series[]>([emptySeries()])
   const [duration, setDuration] = useState<Duration>('3h')
+  const [busy, setBusy] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resultId, setResultId] = useState<string | null>(null)
@@ -100,21 +127,26 @@ export default function Home() {
     })
   }
 
-  function addPhotos(seriesId: string, fileList: FileList | null) {
+  async function addPhotos(seriesId: string, fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return
-    const incoming = Array.from(fileList)
-    setSeries((prev) =>
-      prev.map((s) => {
-        if (s.id !== seriesId) return s
-        const room = MAX_PHOTOS - s.photos.length
-        const added = incoming.slice(0, room).map((file) => ({
-          id: newId(),
-          file,
-          preview: URL.createObjectURL(file),
-        }))
-        return { ...s, photos: [...s.photos, ...added] }
-      })
-    )
+    setBusy(true)
+    try {
+      const processed = await Promise.all(Array.from(fileList).map(toUploadable))
+      setSeries((prev) =>
+        prev.map((s) => {
+          if (s.id !== seriesId) return s
+          const room = MAX_PHOTOS - s.photos.length
+          const added = processed.slice(0, room).map((file) => ({
+            id: newId(),
+            file,
+            preview: URL.createObjectURL(file),
+          }))
+          return { ...s, photos: [...s.photos, ...added] }
+        })
+      )
+    } finally {
+      setBusy(false)
+    }
   }
 
   function removePhoto(seriesId: string, photoId: string) {
@@ -128,31 +160,19 @@ export default function Home() {
     )
   }
 
-  function validate(): string | null {
-    if (series.length < MIN_SERIES || series.length > MAX_SERIES) {
-      return `Ajoute ${MIN_SERIES} à ${MAX_SERIES} séries.`
-    }
-    for (let i = 0; i < series.length; i++) {
-      const count = series[i].photos.length
-      if (count < MIN_PHOTOS || count > MAX_PHOTOS) {
-        return `Chaque série doit contenir entre ${MIN_PHOTOS} et ${MAX_PHOTOS} photos.`
-      }
-    }
-    return null
-  }
+  const canSubmit =
+    series.length >= MIN_SERIES &&
+    series.length <= MAX_SERIES &&
+    series.every((s) => s.photos.length >= MIN_PHOTOS && s.photos.length <= MAX_PHOTOS)
 
   async function handleSubmit() {
+    if (!canSubmit) return
     setError(null)
-    const problem = validate()
-    if (problem) {
-      setError(problem)
-      return
-    }
-
     setSubmitting(true)
     try {
       const formData = new FormData()
       formData.append('duration', duration)
+      if (name.trim()) formData.append('name', name.trim())
       formData.append('seriesOrder', JSON.stringify(series.map((s) => s.id)))
 
       // Compress photos in parallel (capped) instead of one-by-one.
@@ -161,7 +181,6 @@ export default function Home() {
         try {
           return await imageCompression(photo.file, COMPRESSION_OPTIONS)
         } catch {
-          // If compression fails for an image, upload the original instead.
           return photo.file
         }
       })
@@ -172,7 +191,7 @@ export default function Home() {
       const res = await fetch('/api/create', { method: 'POST', body: formData })
       const data = await res.json().catch(() => null)
       if (!res.ok) {
-        throw new Error(data?.error || `Request failed (${res.status})`)
+        throw new Error(data?.error || 'Impossible de créer le test. Réessaie.')
       }
       setResultId(data.id)
       setResultsToken(data.resultsToken)
@@ -213,7 +232,7 @@ export default function Home() {
     }
 
     return (
-      <main className="mx-auto flex min-h-screen w-full max-w-md flex-col gap-6 p-6">
+      <main className="mx-auto flex min-h-screen w-full max-w-md flex-col gap-6 p-6 sm:max-w-lg">
         <div className="mt-6 flex flex-col items-center gap-3 text-center">
           <span className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600 text-white">
             <CheckIcon size={32} />
@@ -278,17 +297,27 @@ export default function Home() {
 
   /* ---------- builder ---------- */
 
-  const totalPhotos = series.reduce((n, s) => n + s.photos.length, 0)
-
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col">
+    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col sm:max-w-lg">
       <div className="flex-1 space-y-6 p-5">
-        <header className="space-y-1 pt-2">
-          <h1 className="text-[26px] font-extrabold tracking-tight">Quelle photo je poste ?</h1>
+        <header className="space-y-2 pt-2">
+          <Wordmark className="text-lg" />
+          <h1 className="text-[26px] font-extrabold leading-tight tracking-tight">
+            Quelle photo je poste ?
+          </h1>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
             Ajoute tes photos, tes amis votent pour la meilleure.
           </p>
         </header>
+
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={40}
+          placeholder="Ton prénom (optionnel)"
+          className="w-full rounded-2xl border border-zinc-200 bg-transparent px-4 py-3 text-sm outline-none placeholder:text-zinc-400 focus:border-fuchsia-500 dark:border-zinc-800"
+        />
 
         <div className="space-y-4">
           {series.map((s, i) => (
@@ -319,6 +348,7 @@ export default function Home() {
                       src={photo.preview}
                       alt=""
                       className="h-full w-full rounded-xl object-cover"
+                      style={{ imageOrientation: 'from-image' }}
                     />
                     <button
                       type="button"
@@ -332,12 +362,14 @@ export default function Home() {
                 ))}
 
                 {s.photos.length < MAX_PHOTOS && (
-                  <label className="flex aspect-square cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-zinc-300 text-zinc-400 transition active:scale-95 dark:border-zinc-700">
-                    <PlusIcon />
-                    <span className="text-[11px] font-medium">Ajouter</span>
+                  <label
+                    className={`flex aspect-square cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-zinc-300 text-zinc-400 transition active:scale-95 dark:border-zinc-700 ${busy ? 'pointer-events-none opacity-60' : ''}`}
+                  >
+                    {busy ? <Spinner /> : <PlusIcon />}
+                    <span className="text-[11px] font-medium">{busy ? 'Traitement…' : 'Ajouter'}</span>
                     <input
                       type="file"
-                      accept="image/*"
+                      accept="image/*,.heic,.heif"
                       multiple
                       className="hidden"
                       onChange={(e) => {
@@ -392,10 +424,15 @@ export default function Home() {
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 14px)' }}
       >
         {error && <p className="mb-2 text-center text-sm text-red-600">{error}</p>}
+        {!canSubmit && !error && (
+          <p className="mb-2 text-center text-xs text-zinc-400">
+            Ajoute au moins {MIN_PHOTOS} photos par série.
+          </p>
+        )}
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={submitting || totalPhotos === 0}
+          disabled={submitting || busy || !canSubmit}
           className="flex w-full items-center justify-center rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 py-4 text-base font-bold text-white shadow-lg shadow-fuchsia-500/25 transition active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
         >
           {submitting ? 'Création…' : 'Créer le test'}

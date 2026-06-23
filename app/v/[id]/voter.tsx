@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 
+import { Wordmark } from '@/app/_components/wordmark'
+
 export type Series = { id: string; images: string[] }
 
 const VOTER_STORAGE_KEY = 'abpic_voter_id'
@@ -20,7 +22,7 @@ function buzz(ms: number) {
 
 /* ---------- icons ---------- */
 
-function CheckIcon({ size = 20 }: { size?: number }) {
+function CheckIcon({ size = 18 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="20 6 9 17 4 12" />
@@ -36,269 +38,207 @@ function ChevronLeftIcon() {
   )
 }
 
-/* ---------- one slide (blurred adaptive backdrop + contained photo) ---------- */
-
-function Slide({
-  src,
-  number,
-  imgRef,
-}: {
-  src: string
-  number: number
-  imgRef: (el: HTMLImageElement | null) => void
-}) {
-  const [loaded, setLoaded] = useState(false)
-  const localRef = useRef<HTMLImageElement | null>(null)
-
-  useEffect(() => {
-    if (localRef.current?.complete) setLoaded(true)
-  }, [src])
-
+function MagnifierIcon() {
   return (
-    <div className="relative flex h-full w-full shrink-0 items-center justify-center overflow-hidden">
-      {/* adaptive backdrop: same photo, blurred & cover, so the letterbox area
-          takes the photo's colors instead of black bands (Instagram-story feel) */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={src}
-        alt=""
-        aria-hidden
-        draggable={false}
-        className={`absolute inset-0 h-full w-full scale-110 object-cover blur-2xl transition-opacity duration-500 ${loaded ? 'opacity-60' : 'opacity-0'}`}
-        style={{ pointerEvents: 'none' }}
-      />
-      <div className="absolute inset-0 bg-black/15" />
-
-      {!loaded && <div className="absolute inset-8 animate-pulse rounded-2xl bg-white/10" />}
-
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        ref={(el) => {
-          localRef.current = el
-          imgRef(el)
-        }}
-        src={src}
-        alt={`Photo ${number}`}
-        draggable={false}
-        onLoad={() => setLoaded(true)}
-        className={`relative max-h-full max-w-full object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
-        style={{ pointerEvents: 'none', transformOrigin: 'center', willChange: 'transform' }}
-      />
-    </div>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
   )
 }
 
-/* ---------- gesture carousel: swipe to navigate, pinch to zoom ---------- */
+function CloseIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  )
+}
 
-function Carousel({
-  images,
-  onPhotoChange,
-  onZoomChange,
-}: {
-  images: string[]
-  onPhotoChange: (i: number) => void
-  onZoomChange: (active: boolean) => void
-}) {
-  const [idx, setIdx] = useState(0)
-  const [zoomedUi, setZoomedUi] = useState(false)
-  const idxRef = useRef(0) // kept in sync inside the gesture handlers below
+/* ---------- fullscreen pinch-to-zoom (neutral background) ---------- */
 
-  const viewportRef = useRef<HTMLDivElement>(null)
-  const trackRef = useRef<HTMLDivElement>(null)
-  const imgRefs = useRef<Array<HTMLImageElement | null>>([])
-  const widthRef = useRef(0)
-
+function ZoomModal({ src, onClose }: { src: string; onClose: () => void }) {
+  const imgRef = useRef<HTMLImageElement>(null)
+  const view = useRef({ scale: 1, tx: 0, ty: 0 })
   const pointers = useRef(new Map<number, { x: number; y: number }>())
-  const everPinched = useRef(false)
-  const zoomedRef = useRef(false)
-  const swipe = useRef({ startX: 0, dx: 0, raw: 0 })
-  const vel = useRef({ x: 0, t: 0, v: 0 })
-  const pinch = useRef({ dist: 0, scale: 1, midX: 0, midY: 0, tx: 0, ty: 0 })
-  const pan = useRef({ x: 0, y: 0, tx: 0, ty: 0 })
-  const zoom = useRef({ scale: 1, tx: 0, ty: 0 })
+  const pinch = useRef<{ dist: number; scale: number } | null>(null)
+  const pan = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
 
-  const width = () => widthRef.current || viewportRef.current?.clientWidth || 1
+  function apply() {
+    const el = imgRef.current
+    if (el) {
+      const { scale, tx, ty } = view.current
+      el.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`
+    }
+  }
+
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
   const pts = () => Array.from(pointers.current.values())
   const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y)
-  const mid = (a: { x: number; y: number }, b: { x: number; y: number }) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
-
-  function setZoomActive(active: boolean) {
-    if (zoomedRef.current === active) return
-    zoomedRef.current = active
-    setZoomedUi(active)
-    onZoomChange(active)
-  }
-
-  function applyTrack(animate = false) {
-    const el = trackRef.current
-    if (!el) return
-    el.style.transition = animate ? 'transform .34s cubic-bezier(.25,.46,.45,.94)' : 'none'
-    el.style.transform = `translateX(${-(idxRef.current * width()) + swipe.current.dx}px)`
-  }
-
-  function applyZoom(animate = false) {
-    const el = imgRefs.current[idxRef.current]
-    if (!el) return
-    el.style.transition = animate ? 'transform .25s ease' : 'none'
-    el.style.transform = `translate(${zoom.current.tx}px, ${zoom.current.ty}px) scale(${zoom.current.scale})`
-    el.style.zIndex = zoom.current.scale > 1 ? '20' : '0'
-  }
-
-  function resetZoom() {
-    zoom.current = { scale: 1, tx: 0, ty: 0 }
-    applyZoom(true)
-    setZoomActive(false)
-  }
 
   function onDown(e: React.PointerEvent) {
     ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
-    if (pointers.current.size === 0) widthRef.current = viewportRef.current?.clientWidth || 0
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-
     if (pointers.current.size === 2) {
-      everPinched.current = true
       const [a, b] = pts()
-      const m = mid(a, b)
-      pinch.current = { dist: dist(a, b) || 1, scale: zoom.current.scale, midX: m.x, midY: m.y, tx: zoom.current.tx, ty: zoom.current.ty }
-      swipe.current.dx = 0
-      applyTrack(true)
+      pinch.current = { dist: dist(a, b) || 1, scale: view.current.scale }
+      pan.current = null
     } else if (pointers.current.size === 1) {
-      const p = pts()[0]
-      if (zoom.current.scale > 1) {
-        pan.current = { x: p.x, y: p.y, tx: zoom.current.tx, ty: zoom.current.ty }
-      } else {
-        swipe.current = { startX: p.x, dx: 0, raw: 0 }
-        vel.current = { x: p.x, t: e.timeStamp, v: 0 }
-      }
+      pan.current = { x: e.clientX, y: e.clientY, tx: view.current.tx, ty: view.current.ty }
     }
   }
 
   function onMove(e: React.PointerEvent) {
     if (!pointers.current.has(e.pointerId)) return
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-
-    if (pointers.current.size >= 2) {
+    if (pointers.current.size >= 2 && pinch.current) {
       const [a, b] = pts()
-      const m = mid(a, b)
-      // Dampen the pinch so the zoom is less sensitive.
       const ratio = dist(a, b) / pinch.current.dist
-      const damped = 1 + (ratio - 1) * 0.55
-      zoom.current.scale = Math.min(4, Math.max(1, pinch.current.scale * damped))
-      zoom.current.tx = pinch.current.tx + (m.x - pinch.current.midX)
-      zoom.current.ty = pinch.current.ty + (m.y - pinch.current.midY)
-      applyZoom()
-      if (zoom.current.scale > 1.04) setZoomActive(true)
-    } else if (pointers.current.size === 1) {
-      const p = pts()[0]
-      if (zoom.current.scale > 1) {
-        zoom.current.tx = pan.current.tx + (p.x - pan.current.x)
-        zoom.current.ty = pan.current.ty + (p.y - pan.current.y)
-        applyZoom()
-      } else if (!everPinched.current) {
-        const raw = p.x - swipe.current.startX
-        const atStart = idxRef.current === 0 && raw > 0
-        const atEnd = idxRef.current === images.length - 1 && raw < 0
-        swipe.current.raw = raw
-        swipe.current.dx = atStart || atEnd ? raw * 0.3 : raw // rubber-band at edges
-        const dt = e.timeStamp - vel.current.t
-        if (dt > 0) vel.current.v = (p.x - vel.current.x) / dt
-        vel.current.x = p.x
-        vel.current.t = e.timeStamp
-        applyTrack(false)
-      }
+      view.current.scale = Math.min(5, Math.max(1, pinch.current.scale * (1 + (ratio - 1) * 0.7)))
+      apply()
+    } else if (pointers.current.size === 1 && pan.current && view.current.scale > 1) {
+      view.current.tx = pan.current.tx + (e.clientX - pan.current.x)
+      view.current.ty = pan.current.ty + (e.clientY - pan.current.y)
+      apply()
     }
   }
 
   function onUp(e: React.PointerEvent) {
     pointers.current.delete(e.pointerId)
-
-    if (pointers.current.size === 0) {
-      if (everPinched.current || zoom.current.scale > 1) {
-        resetZoom() // release pinch -> spring back, UI fades in
-      } else {
-        const threshold = width() * 0.2
-        const flick = Math.abs(vel.current.v) > 0.35 // px/ms
-        let n = idxRef.current
-        const goNext = swipe.current.raw < -threshold || (flick && vel.current.v < 0)
-        const goPrev = swipe.current.raw > threshold || (flick && vel.current.v > 0)
-        if (goNext && n < images.length - 1) n++
-        else if (goPrev && n > 0) n--
-        swipe.current.dx = 0
-        swipe.current.raw = 0
-        if (n !== idxRef.current) {
-          buzz(8)
-          idxRef.current = n
-          setIdx(n)
-          onPhotoChange(n)
-        }
-        applyTrack(true)
+    pinch.current = null
+    pan.current = null
+    if (view.current.scale <= 1) {
+      view.current = { scale: 1, tx: 0, ty: 0 }
+      const el = imgRef.current
+      if (el) {
+        el.style.transition = 'transform .25s ease'
+        apply()
+        setTimeout(() => el && (el.style.transition = 'none'), 260)
       }
-      everPinched.current = false
-    } else if (pointers.current.size === 1 && zoom.current.scale > 1) {
-      const p = pts()[0]
-      pan.current = { x: p.x, y: p.y, tx: zoom.current.tx, ty: zoom.current.ty }
     }
   }
 
-  function goTo(i: number) {
-    widthRef.current = viewportRef.current?.clientWidth || 0
-    idxRef.current = i
-    setIdx(i)
-    onPhotoChange(i)
-    applyTrack(true)
-  }
-
   return (
-    <>
+    <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950">
+      <div className="flex justify-end p-3" style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
+        <button type="button" onClick={onClose} aria-label="Fermer" className="rounded-full bg-white/10 p-2 text-white active:scale-90">
+          <CloseIcon />
+        </button>
+      </div>
       <div
-        ref={viewportRef}
-        className="absolute inset-0 touch-none select-none overflow-hidden"
+        className="flex flex-1 touch-none select-none items-center justify-center overflow-hidden"
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerCancel={onUp}
+        onDoubleClick={() => {
+          view.current = view.current.scale > 1 ? { scale: 1, tx: 0, ty: 0 } : { scale: 2.5, tx: 0, ty: 0 }
+          apply()
+        }}
       >
-        <div ref={trackRef} className="flex h-full">
-          {images.map((src, i) => (
-            <Slide
-              key={i}
-              src={src}
-              number={i + 1}
-              imgRef={(el) => {
-                imgRefs.current[i] = el
-              }}
-            />
-          ))}
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          ref={imgRef}
+          src={src}
+          alt=""
+          draggable={false}
+          className="max-h-full max-w-full object-contain will-change-transform"
+          style={{ transformOrigin: 'center', pointerEvents: 'none', imageOrientation: 'from-image' }}
+        />
       </div>
+      <p className="pb-6 pt-2 text-center text-xs text-white/45">Pince pour zoomer</p>
+    </div>
+  )
+}
 
-      {images.length > 1 && (
-        <div
-          className={`pointer-events-none absolute inset-x-0 bottom-3 flex justify-center transition-opacity duration-200 ${zoomedUi ? 'opacity-0' : 'opacity-100'}`}
-        >
-          <div className="flex gap-1.5 rounded-full bg-black/40 px-2.5 py-1.5 backdrop-blur">
-            {images.map((_, i) => (
-              <button
-                key={i}
-                type="button"
-                aria-label={`Photo ${i + 1}`}
-                onClick={() => goTo(i)}
-                className={`pointer-events-auto h-2 rounded-full transition-all ${i === idx ? 'w-6 bg-white' : 'w-2 bg-white/55'}`}
-              />
-            ))}
-          </div>
+/* ---------- one comparable photo ---------- */
+
+function PhotoCard({
+  src,
+  index,
+  selected,
+  onSelect,
+  onZoom,
+}: {
+  src: string
+  index: number
+  selected: boolean
+  onSelect: () => void
+  onZoom: () => void
+}) {
+  const [loaded, setLoaded] = useState(false)
+  const imgRef = useRef<HTMLImageElement>(null)
+
+  useEffect(() => {
+    if (imgRef.current?.complete) setLoaded(true)
+  }, [src])
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-pressed={selected}
+        className={`block w-full overflow-hidden rounded-2xl border-2 transition ${
+          selected ? 'border-fuchsia-500 ring-2 ring-fuchsia-500/30' : 'border-white/10'
+        }`}
+      >
+        <div className="relative aspect-[3/4] bg-zinc-900">
+          {!loaded && <div className="absolute inset-0 animate-pulse bg-white/5" />}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            ref={imgRef}
+            src={src}
+            alt={`Photo ${index + 1}`}
+            onLoad={() => setLoaded(true)}
+            className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+            style={{ imageOrientation: 'from-image' }}
+          />
+          {selected && (
+            <span className="absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600 text-white shadow-lg">
+              <CheckIcon />
+            </span>
+          )}
         </div>
-      )}
-    </>
+      </button>
+
+      <button
+        type="button"
+        onClick={onZoom}
+        aria-label="Agrandir la photo"
+        className="absolute left-2.5 top-2.5 rounded-full bg-black/50 p-2 text-white backdrop-blur active:scale-90"
+      >
+        <MagnifierIcon />
+      </button>
+    </div>
   )
 }
 
 /* ---------- main voter ---------- */
 
-export default function Voter({ testId, series }: { testId: string; series: Series[] }) {
+export default function Voter({
+  testId,
+  series,
+  creatorName,
+}: {
+  testId: string
+  series: Series[]
+  creatorName: string | null
+}) {
   const [index, setIndex] = useState(0)
-  const [photo, setPhoto] = useState(0)
-  const [zoomed, setZoomed] = useState(false)
+  const [selections, setSelections] = useState<(number | null)[]>(() => series.map(() => null))
+  const [zoomSrc, setZoomSrc] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function sendVote(seriesId: string, imageIndex: number) {
@@ -324,22 +264,32 @@ export default function Voter({ testId, series }: { testId: string; series: Seri
     }
   }
 
-  function choose() {
-    buzz(20)
-    sendVote(series[index].id, photo)
-    setPhoto(0)
+  function select(imageIndex: number) {
+    buzz(8)
+    setSelections((prev) => {
+      const next = [...prev]
+      next[index] = imageIndex
+      return next
+    })
+  }
+
+  function valider() {
+    const choice = selections[index]
+    if (choice === null) return
+    buzz(18)
+    sendVote(series[index].id, choice)
     setIndex((i) => i + 1)
   }
 
   function back() {
     buzz(8)
-    setPhoto(0)
     setIndex((i) => Math.max(0, i - 1))
   }
 
   if (index >= series.length) {
     return (
-      <div className="fixed inset-0 flex flex-col items-center justify-center gap-5 bg-black px-6 text-white">
+      <main className="flex min-h-screen flex-col items-center justify-center gap-5 bg-zinc-950 px-6 text-center text-white">
+        <Wordmark className="absolute top-5 text-lg" />
         <div className="relative flex h-24 w-24 items-center justify-center">
           <span className="absolute inline-flex h-full w-full rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600 opacity-60 motion-safe:animate-ping" />
           <span className="relative flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600">
@@ -348,62 +298,91 @@ export default function Voter({ testId, series }: { testId: string; series: Seri
         </div>
         <h1 className="text-3xl font-extrabold tracking-tight">Merci, c’est voté !</h1>
         {error && <p className="text-sm text-red-400">{error}</p>}
-      </div>
+      </main>
     )
   }
 
   const current = series[index]
+  const selected = selections[index]
+  const gridCols = current.images.length === 2 ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'
+  const context = creatorName
+    ? `Aide ${creatorName} à choisir la photo à poster — tape ta préférée.`
+    : 'Aide à choisir la photo à poster — tape ta préférée.'
 
   return (
-    <div className="fixed inset-0 flex flex-col overflow-hidden bg-black text-white">
-      {/* thin top bar: progress — only useful with more than one series */}
-      {series.length > 1 && (
-        <div
-          className={`px-3 transition-opacity duration-200 ${zoomed ? 'opacity-0' : 'opacity-100'}`}
-          style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)', paddingBottom: '8px' }}
-        >
-          <div className="flex gap-1.5">
-            {series.map((s, i) => (
-              <div key={s.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/25">
-                <div className={`h-full rounded-full bg-white transition-all duration-300 ${i <= index ? 'w-full' : 'w-0'}`} />
-              </div>
+    <main className="flex min-h-screen flex-col bg-zinc-950 text-white">
+      <div className="mx-auto flex w-full max-w-md flex-1 flex-col px-5 sm:max-w-2xl">
+        <header className="space-y-3 pb-2 pt-5">
+          <div className="flex items-center justify-between">
+            <Wordmark className="text-lg" />
+            {series.length > 1 && (
+              <span className="text-xs font-medium text-white/40">
+                {index + 1} / {series.length}
+              </span>
+            )}
+          </div>
+          {series.length > 1 && (
+            <div className="flex gap-1.5">
+              {series.map((s, i) => (
+                <div key={s.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/15">
+                  <div className={`h-full rounded-full bg-white transition-all duration-300 ${i <= index ? 'w-full' : 'w-0'}`} />
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-sm text-white/60">{context}</p>
+        </header>
+
+        <div className="flex flex-1 items-start py-4">
+          <div className={`grid w-full gap-3 sm:gap-4 ${gridCols}`}>
+            {current.images.map((src, imageIndex) => (
+              <PhotoCard
+                key={imageIndex}
+                src={src}
+                index={imageIndex}
+                selected={selected === imageIndex}
+                onSelect={() => select(imageIndex)}
+                onZoom={() => setZoomSrc(src)}
+              />
             ))}
           </div>
         </div>
-      )}
-
-      {/* photo area (bounded: stops above the button) */}
-      <div className="relative min-h-0 flex-1">
-        <Carousel key={`series-${index}`} images={current.images} onPhotoChange={setPhoto} onZoomChange={setZoomed} />
-
-        {index > 0 && (
-          <button
-            type="button"
-            onClick={back}
-            aria-label="Précédent"
-            className={`absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/40 backdrop-blur transition-opacity duration-200 active:scale-90 ${zoomed ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
-          >
-            <ChevronLeftIcon />
-          </button>
-        )}
       </div>
 
-      {/* bottom: choose button (photo never goes behind it) */}
       <div
-        className={`px-4 pt-2 transition-opacity duration-200 ${zoomed ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
+        className="sticky bottom-0 border-t border-white/10 bg-zinc-950/85 backdrop-blur"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 14px)' }}
       >
-        {error && (
-          <p className="mb-2 rounded-xl bg-red-500/20 px-3 py-2 text-center text-sm text-red-200">{error}</p>
-        )}
-        <button
-          type="button"
-          onClick={choose}
-          className="flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 py-4 text-base font-bold text-white shadow-lg shadow-fuchsia-500/25 transition active:scale-[0.98]"
-        >
-          <CheckIcon /> Choisir la photo {photo + 1}
-        </button>
+        <div className="mx-auto w-full max-w-md px-5 pt-3 sm:max-w-2xl">
+          {error && <p className="mb-2 text-center text-sm text-red-400">{error}</p>}
+          <div className="flex gap-3">
+            {index > 0 && (
+              <button
+                type="button"
+                onClick={back}
+                aria-label="Précédent"
+                className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full border border-white/15 text-white active:scale-95"
+              >
+                <ChevronLeftIcon />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={valider}
+              disabled={selected === null}
+              className="flex flex-1 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 py-4 text-base font-bold text-white shadow-lg shadow-fuchsia-500/25 transition active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
+            >
+              {selected === null
+                ? 'Choisis ta préférée'
+                : index === series.length - 1
+                  ? 'Valider'
+                  : 'Suivant'}
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
+
+      {zoomSrc && <ZoomModal src={zoomSrc} onClose={() => setZoomSrc(null)} />}
+    </main>
   )
 }

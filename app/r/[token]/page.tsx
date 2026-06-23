@@ -1,3 +1,4 @@
+import { Wordmark } from '@/app/_components/wordmark'
 import { getSupabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -11,11 +12,10 @@ function isExpired(expiresAt: string): boolean {
 
 function NotFound() {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col items-center justify-center gap-3 p-6 text-center">
-      <h1 className="text-2xl font-bold">Results not found</h1>
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        This results link is invalid.
-      </p>
+    <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-950 px-6 text-center text-white">
+      <Wordmark className="absolute top-5 text-lg" />
+      <h1 className="text-2xl font-bold">Résultats introuvables</h1>
+      <p className="text-sm text-zinc-400">Ce lien de résultats n’est pas valide.</p>
     </main>
   )
 }
@@ -58,71 +58,87 @@ export default async function ResultsPage({
   }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col gap-6 p-6">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold">Results</h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          {expired ? 'This test has ended.' : 'This test is still collecting votes.'}
-        </p>
-      </header>
+    <main className="min-h-screen bg-zinc-950 text-white">
+      <div className="mx-auto w-full max-w-md px-5 py-6 sm:max-w-2xl">
+        <header className="mb-6 space-y-3">
+          <Wordmark className="text-lg" />
+          <div>
+            <h1 className="text-3xl font-extrabold tracking-tight">Résultats</h1>
+            <p className="mt-1 text-sm text-zinc-400">
+              {expired ? 'Le vote est terminé.' : 'Le vote est en cours…'}
+            </p>
+          </div>
+        </header>
 
-      {series.map((s, seriesIndex) => {
-        const counts = tally.get(s.id) ?? []
-        const total = counts.reduce((sum, n) => sum + n, 0)
-        const maxCount = Math.max(0, ...counts)
+        <div className="space-y-5">
+          {series.map((s, seriesIndex) => {
+            const counts = tally.get(s.id) ?? []
+            const total = counts.reduce((sum, n) => sum + n, 0)
+            const maxCount = Math.max(0, ...counts)
 
-        return (
-          <section
-            key={s.id}
-            className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700"
-          >
-            <div className="flex items-baseline justify-between">
-              <h2 className="font-semibold">Series {seriesIndex + 1}</h2>
-              <span className="text-xs text-zinc-500">
-                {total} {total === 1 ? 'vote' : 'votes'}
-              </span>
-            </div>
+            return (
+              <section
+                key={s.id}
+                className="rounded-3xl border border-white/10 bg-white/[0.03] p-4"
+              >
+                <div className="mb-3 flex items-baseline justify-between">
+                  <h2 className="text-sm font-bold">
+                    {series.length > 1 ? `Série ${seriesIndex + 1}` : 'Tes photos'}
+                  </h2>
+                  <span className="text-xs text-zinc-500">
+                    {total === 0
+                      ? 'Encore aucun vote'
+                      : `${total} ${total === 1 ? 'vote' : 'votes'}`}
+                  </span>
+                </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              {s.images.map((src, imageIndex) => {
-                const count = counts[imageIndex] ?? 0
-                const pct = total > 0 ? Math.round((count / total) * 100) : 0
-                const isWinner = total > 0 && count === maxCount
+                <div className={`grid gap-3 ${s.images.length === 2 ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'}`}>
+                  {s.images.map((src, imageIndex) => {
+                    const count = counts[imageIndex] ?? 0
+                    const pct = total > 0 ? Math.round((count / total) * 100) : 0
+                    const isWinner = total > 0 && count === maxCount
 
-                return (
-                  <div key={imageIndex} className="flex flex-col gap-1">
-                    <div
-                      className={`relative aspect-square overflow-hidden rounded-xl border-2 ${
-                        isWinner
-                          ? 'border-green-500'
-                          : 'border-zinc-200 dark:border-zinc-700'
-                      }`}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={src}
-                        alt={`Option ${imageIndex + 1}`}
-                        className="h-full w-full object-cover"
-                      />
-                      {isWinner && (
-                        <span className="absolute left-1 top-1 rounded-full bg-green-500 px-2 py-0.5 text-xs font-semibold text-white">
-                          Winner
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-baseline justify-between text-sm">
-                      <span className="font-semibold">{pct}%</span>
-                      <span className="text-zinc-500">
-                        {count} {count === 1 ? 'vote' : 'votes'}
-                      </span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </section>
-        )
-      })}
+                    return (
+                      <div key={imageIndex} className="flex flex-col gap-1.5">
+                        <div
+                          className={`relative aspect-[3/4] overflow-hidden rounded-2xl border-2 bg-zinc-900 ${
+                            isWinner ? 'border-fuchsia-500' : 'border-white/10'
+                          }`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={src}
+                            alt={`Photo ${imageIndex + 1}`}
+                            className="absolute inset-0 h-full w-full object-contain"
+                            style={{ imageOrientation: 'from-image' }}
+                          />
+                          {isWinner && (
+                            <span className="absolute left-2 top-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 px-2.5 py-0.5 text-xs font-bold text-white shadow">
+                              Gagnante
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-baseline justify-between text-sm">
+                          <span className="font-bold">{pct}%</span>
+                          <span className="text-zinc-500">
+                            {count} {count === 1 ? 'vote' : 'votes'}
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            )
+          })}
+        </div>
+      </div>
     </main>
   )
 }

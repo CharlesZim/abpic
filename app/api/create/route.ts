@@ -70,20 +70,22 @@ export async function POST(request: Request) {
   try {
     formData = await request.formData()
   } catch {
-    return Response.json({ error: 'Expected multipart form data' }, { status: 400 })
+    return Response.json({ error: 'Format invalide.' }, { status: 400 })
   }
 
   const duration = String(formData.get('duration') ?? '')
   const hours = DURATION_HOURS[duration]
   if (!hours) {
-    return Response.json({ error: 'Invalid duration' }, { status: 400 })
+    return Response.json({ error: 'Durée invalide.' }, { status: 400 })
   }
+
+  const creatorName = String(formData.get('name') ?? '').trim().slice(0, 40) || null
 
   let seriesOrder: string[]
   try {
     seriesOrder = JSON.parse(String(formData.get('seriesOrder') ?? ''))
   } catch {
-    return Response.json({ error: 'Invalid seriesOrder' }, { status: 400 })
+    return Response.json({ error: 'Données invalides.' }, { status: 400 })
   }
 
   if (
@@ -92,7 +94,7 @@ export async function POST(request: Request) {
     seriesOrder.length > MAX_SERIES ||
     !seriesOrder.every((id) => typeof id === 'string')
   ) {
-    return Response.json({ error: 'A test must have 1 to 5 series' }, { status: 400 })
+    return Response.json({ error: 'Un test doit avoir 1 à 5 séries.' }, { status: 400 })
   }
 
   // Collect, validate, and content-sniff every photo up front so we reject
@@ -107,7 +109,7 @@ export async function POST(request: Request) {
 
     if (files.length < MIN_PHOTOS_PER_SERIES || files.length > MAX_PHOTOS_PER_SERIES) {
       return Response.json(
-        { error: 'Each series must have 2 to 5 photos' },
+        { error: 'Chaque série doit contenir 2 à 5 photos.' },
         { status: 400 }
       )
     }
@@ -116,20 +118,20 @@ export async function POST(request: Request) {
     for (const file of files) {
       if (file.size === 0 || file.size > MAX_FILE_BYTES) {
         return Response.json(
-          { error: 'Each photo must be a non-empty image under 8 MB' },
+          { error: 'Chaque photo doit faire moins de 8 Mo.' },
           { status: 400 }
         )
       }
       totalBytes += file.size
       if (totalBytes > MAX_TOTAL_BYTES) {
-        return Response.json({ error: 'Total upload is too large' }, { status: 400 })
+        return Response.json({ error: 'L’envoi total est trop volumineux.' }, { status: 400 })
       }
 
       const head = new Uint8Array(await file.slice(0, 12).arrayBuffer())
       const mime = sniffImageType(head)
       if (!mime) {
         return Response.json(
-          { error: 'Photos must be JPEG, PNG, WebP, or GIF images' },
+          { error: 'Les photos doivent être en JPEG, PNG, WebP ou GIF.' },
           { status: 400 }
         )
       }
@@ -164,7 +166,7 @@ export async function POST(request: Request) {
     if (failed?.error) {
       console.error('[api/create] upload failed:', failed.error)
       return Response.json(
-        { error: `Upload: ${failed.error.message}` },
+        { error: 'L’envoi des photos a échoué. Réessaie.' },
         { status: 500 }
       )
     }
@@ -182,14 +184,18 @@ export async function POST(request: Request) {
 
     const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
 
-    const { error: insertError } = await supabase
-      .from('tests')
-      .insert({ id: testId, series, expires_at: expiresAt, results_token: resultsToken })
+    const { error: insertError } = await supabase.from('tests').insert({
+      id: testId,
+      series,
+      expires_at: expiresAt,
+      results_token: resultsToken,
+      creator_name: creatorName,
+    })
 
     if (insertError) {
       console.error('[api/create] insert failed:', insertError)
       return Response.json(
-        { error: `Insert: ${insertError.message}` },
+        { error: 'Impossible de créer le test. Réessaie.' },
         { status: 500 }
       )
     }
@@ -197,9 +203,6 @@ export async function POST(request: Request) {
     return Response.json({ id: testId, resultsToken })
   } catch (err) {
     console.error('[api/create] failed:', err)
-    return Response.json(
-      { error: err instanceof Error ? err.message : 'Unexpected server error' },
-      { status: 500 }
-    )
+    return Response.json({ error: 'Une erreur est survenue. Réessaie.' }, { status: 500 })
   }
 }
