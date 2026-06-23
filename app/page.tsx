@@ -1,7 +1,7 @@
 'use client'
 
 import imageCompression from 'browser-image-compression'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { Wordmark } from '@/app/_components/wordmark'
 import { getSupabaseBrowser } from '@/lib/supabase-browser'
@@ -37,6 +37,15 @@ function newId() {
   return crypto.randomUUID()
 }
 
+// Never let a single step hang forever (e.g. HEIC that the browser can't
+// decode): reject after `ms` so the photo resolves to uploaded or failed.
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ])
+}
+
 function emptySeries(): Series {
   return { id: newId(), photos: [] }
 }
@@ -70,9 +79,13 @@ function CheckIcon({ size = 18 }: { size?: number }) {
   )
 }
 
-function Spinner() {
+function Spinner({ px = 20 }: { px?: number }) {
   return (
-    <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true" />
+    <span
+      style={{ width: px, height: px }}
+      className="inline-block animate-spin rounded-full border-2 border-white/40 border-t-white"
+      aria-hidden="true"
+    />
   )
 }
 
@@ -85,6 +98,8 @@ export default function Home() {
   const [resultId, setResultId] = useState<string | null>(null)
   const [resultsToken, setResultsToken] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  // In-flight upload per photo id, so "Créer" can await background uploads.
+  const uploads = useRef(new Map<string, Promise<string | null>>())
 
   function updatePhoto(seriesId: string, photoId: string, fn: (p: Photo) => Photo) {
     setSeries((prev) =>
@@ -94,14 +109,15 @@ export default function Home() {
     )
   }
 
-  async function uploadOne(seriesId: string, photo: Photo) {
+  // Compress + upload one photo in the background. Returns its public URL, or
+  // null on failure. Never hangs (each step is time-boxed).
+  async function uploadOne(seriesId: string, photo: Photo): Promise<string | null> {
     let blob: Blob = photo.file
     try {
-      blob = await imageCompression(photo.file, COMPRESSION_OPTIONS)
+      blob = await withTimeout(imageCompression(photo.file, COMPRESSION_OPTIONS), 20000)
     } catch {
       blob = photo.file
     }
-    // Swap the preview to the compressed JPEG so it renders in every browser.
     const newPreview = URL.createObjectURL(blob)
     updatePhoto(seriesId, photo.id, (p) => {
       if (p.preview) URL.revokeObjectURL(p.preview)
@@ -109,18 +125,27 @@ export default function Home() {
     })
 
     try {
-      const r = await fetch('/api/sign-upload', { method: 'POST' })
+      const r = await withTimeout(fetch('/api/sign-upload', { method: 'POST' }), 15000)
       const d = await r.json().catch(() => null)
       if (!r.ok || !d) throw new Error()
       const sb = getSupabaseBrowser()
-      const { error: upErr } = await sb.storage
-        .from('photos')
-        .uploadToSignedUrl(d.path, d.token, blob, { contentType: 'image/jpeg', upsert: true })
+      const { error: upErr } = await withTimeout(
+        sb.storage
+          .from('photos')
+          .uploadToSignedUrl(d.path, d.token, blob, { contentType: 'image/jpeg', upsert: true }),
+        30000
+      )
       if (upErr) throw upErr
       updatePhoto(seriesId, photo.id, (p) => ({ ...p, url: d.publicUrl, uploading: false, failed: false }))
+      return d.publicUrl
     } catch {
       updatePhoto(seriesId, photo.id, (p) => ({ ...p, uploading: false, failed: true }))
+      return null
     }
+  }
+
+  function startUpload(seriesId: string, photo: Photo) {
+    uploads.current.set(photo.id, uploadOne(seriesId, photo))
   }
 
   function addPhotos(seriesId: string, fileList: FileList | null) {
@@ -143,12 +168,12 @@ export default function Home() {
     setSeries((prev) =>
       prev.map((s) => (s.id === seriesId ? { ...s, photos: [...s.photos, ...adding] } : s))
     )
-    adding.forEach((p) => uploadOne(seriesId, p))
+    adding.forEach((p) => startUpload(seriesId, p))
   }
 
   function retry(seriesId: string, photo: Photo) {
     updatePhoto(seriesId, photo.id, (p) => ({ ...p, uploading: true, failed: false }))
-    uploadOne(seriesId, photo)
+    startUpload(seriesId, photo)
   }
 
   function addSeries() {
@@ -175,27 +200,44 @@ export default function Home() {
     )
   }
 
-  const countsOk =
+  // Only the photo count gates the button — uploads run in the background and
+  // are awaited when the user taps "Créer".
+  const canSubmit =
     series.length >= MIN_SERIES &&
     series.length <= MAX_SERIES &&
     series.every((s) => s.photos.length >= MIN_PHOTOS && s.photos.length <= MAX_PHOTOS)
   const anyUploading = series.some((s) => s.photos.some((p) => p.uploading))
-  const anyFailed = series.some((s) => s.photos.some((p) => p.failed))
-  const canSubmit = countsOk && !anyUploading && !anyFailed
 
   async function handleSubmit() {
     if (!canSubmit) return
     setError(null)
     setSubmitting(true)
     try {
+      // Resolve every photo to a URL: use what's ready, await in-flight
+      // uploads, and retry anything that isn't done yet.
+      const seriesUrls: (string | null)[][] = []
+      for (const s of series) {
+        const urls: (string | null)[] = []
+        for (const p of s.photos) {
+          let url = p.url
+          if (!url) {
+            const pending = uploads.current.get(p.id)
+            url = pending ? await pending : null
+          }
+          if (!url) url = await uploadOne(s.id, p)
+          urls.push(url)
+        }
+        seriesUrls.push(urls)
+      }
+
+      if (seriesUrls.some((u) => u.some((x) => !x))) {
+        throw new Error('Certaines photos n’ont pas pu être envoyées. Réessaie.')
+      }
+
       const res = await fetch('/api/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          duration,
-          name: name.trim() || undefined,
-          series: series.map((s) => s.photos.map((p) => p.url)),
-        }),
+        body: JSON.stringify({ duration, name: name.trim() || undefined, series: seriesUrls }),
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) {
@@ -359,9 +401,9 @@ export default function Home() {
                       style={{ imageOrientation: 'from-image' }}
                     />
                     {photo.uploading && (
-                      <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/40">
-                        <Spinner />
-                      </div>
+                      <span className="absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/55">
+                        <Spinner px={14} />
+                      </span>
                     )}
                     {photo.failed && (
                       <button
@@ -373,16 +415,14 @@ export default function Home() {
                         Réessayer
                       </button>
                     )}
-                    {!photo.uploading && (
-                      <button
-                        type="button"
-                        onClick={() => removePhoto(s.id, photo.id)}
-                        aria-label="Retirer la photo"
-                        className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs text-white backdrop-blur active:scale-90"
-                      >
-                        ✕
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => removePhoto(s.id, photo.id)}
+                      aria-label="Retirer la photo"
+                      className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs text-white backdrop-blur active:scale-90"
+                    >
+                      ✕
+                    </button>
                   </div>
                 ))}
 
@@ -449,11 +489,12 @@ export default function Home() {
         {error && <p className="mb-2 text-center text-sm text-red-600">{error}</p>}
         {!error && !canSubmit && (
           <p className="mb-2 text-center text-xs text-zinc-400">
-            {anyUploading
-              ? 'Envoi des photos…'
-              : anyFailed
-                ? 'Une photo n’a pas pu être envoyée — tape dessus pour réessayer.'
-                : `Ajoute au moins ${MIN_PHOTOS} photos par série.`}
+            Ajoute au moins {MIN_PHOTOS} photos par série.
+          </p>
+        )}
+        {!error && canSubmit && anyUploading && (
+          <p className="mb-2 text-center text-xs text-zinc-400">
+            Photos en cours d’envoi… tu peux déjà valider.
           </p>
         )}
         <button
