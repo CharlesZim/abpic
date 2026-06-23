@@ -6,7 +6,14 @@ import { useState } from 'react'
 import { Wordmark } from '@/app/_components/wordmark'
 import { getSupabaseBrowser } from '@/lib/supabase-browser'
 
-type Photo = { id: string; file: File; preview: string }
+type Photo = {
+  id: string
+  file: File
+  preview: string
+  url: string | null
+  uploading: boolean
+  failed: boolean
+}
 type Series = { id: string; photos: Photo[] }
 
 const DURATIONS = ['1h', '3h', '6h', '12h', '24h'] as const
@@ -20,50 +27,14 @@ const MIN_PHOTOS = 2
 const COMPRESSION_OPTIONS = {
   maxWidthOrHeight: 1080,
   maxSizeMB: 0.4,
+  // Force JPEG output: this also decodes HEIC natively (iOS Safari) so we
+  // don't need a heavy WASM converter that can hang.
   fileType: 'image/jpeg',
-  // Run on the main thread: the web-worker path imports the library from a
-  // CDN at runtime, which fails (e.g. Safari throws "The string did not match
-  // the expected pattern.") when that request is blocked or offline.
   useWebWorker: false,
 }
 
 function newId() {
   return crypto.randomUUID()
-}
-
-// Run async work over a list with limited concurrency, preserving order.
-async function mapLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>
-): Promise<R[]> {
-  const results = new Array<R>(items.length)
-  let cursor = 0
-  async function worker() {
-    while (cursor < items.length) {
-      const i = cursor++
-      results[i] = await fn(items[i], i)
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
-  return results
-}
-
-// iPhones often hand us HEIC/HEIF; convert to JPEG so every browser can show
-// and every server can process the photo.
-async function toUploadable(file: File): Promise<File> {
-  const isHeic = /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name)
-  if (!isHeic) return file
-  try {
-    const heic2any = (await import('heic2any')).default
-    const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 })
-    const blob = Array.isArray(out) ? out[0] : out
-    return new File([blob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), {
-      type: 'image/jpeg',
-    })
-  } catch {
-    return file
-  }
 }
 
 function emptySeries(): Series {
@@ -101,7 +72,7 @@ function CheckIcon({ size = 18 }: { size?: number }) {
 
 function Spinner() {
   return (
-    <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />
+    <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true" />
   )
 }
 
@@ -109,12 +80,76 @@ export default function Home() {
   const [name, setName] = useState('')
   const [series, setSeries] = useState<Series[]>([emptySeries()])
   const [duration, setDuration] = useState<Duration>('3h')
-  const [busy, setBusy] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resultId, setResultId] = useState<string | null>(null)
   const [resultsToken, setResultsToken] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+
+  function updatePhoto(seriesId: string, photoId: string, fn: (p: Photo) => Photo) {
+    setSeries((prev) =>
+      prev.map((s) =>
+        s.id !== seriesId ? s : { ...s, photos: s.photos.map((p) => (p.id === photoId ? fn(p) : p)) }
+      )
+    )
+  }
+
+  async function uploadOne(seriesId: string, photo: Photo) {
+    let blob: Blob = photo.file
+    try {
+      blob = await imageCompression(photo.file, COMPRESSION_OPTIONS)
+    } catch {
+      blob = photo.file
+    }
+    // Swap the preview to the compressed JPEG so it renders in every browser.
+    const newPreview = URL.createObjectURL(blob)
+    updatePhoto(seriesId, photo.id, (p) => {
+      if (p.preview) URL.revokeObjectURL(p.preview)
+      return { ...p, preview: newPreview }
+    })
+
+    try {
+      const r = await fetch('/api/sign-upload', { method: 'POST' })
+      const d = await r.json().catch(() => null)
+      if (!r.ok || !d) throw new Error()
+      const sb = getSupabaseBrowser()
+      const { error: upErr } = await sb.storage
+        .from('photos')
+        .uploadToSignedUrl(d.path, d.token, blob, { contentType: 'image/jpeg', upsert: true })
+      if (upErr) throw upErr
+      updatePhoto(seriesId, photo.id, (p) => ({ ...p, url: d.publicUrl, uploading: false, failed: false }))
+    } catch {
+      updatePhoto(seriesId, photo.id, (p) => ({ ...p, uploading: false, failed: true }))
+    }
+  }
+
+  function addPhotos(seriesId: string, fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return
+    const current = series.find((s) => s.id === seriesId)
+    const room = current ? MAX_PHOTOS - current.photos.length : 0
+    if (room <= 0) return
+
+    const adding: Photo[] = Array.from(fileList)
+      .slice(0, room)
+      .map((file) => ({
+        id: newId(),
+        file,
+        preview: URL.createObjectURL(file),
+        url: null,
+        uploading: true,
+        failed: false,
+      }))
+
+    setSeries((prev) =>
+      prev.map((s) => (s.id === seriesId ? { ...s, photos: [...s.photos, ...adding] } : s))
+    )
+    adding.forEach((p) => uploadOne(seriesId, p))
+  }
+
+  function retry(seriesId: string, photo: Photo) {
+    updatePhoto(seriesId, photo.id, (p) => ({ ...p, uploading: true, failed: false }))
+    uploadOne(seriesId, photo)
+  }
 
   function addSeries() {
     setSeries((prev) => (prev.length >= MAX_SERIES ? prev : [...prev, emptySeries()]))
@@ -124,31 +159,9 @@ export default function Home() {
     setSeries((prev) => {
       if (prev.length <= MIN_SERIES) return prev
       const target = prev.find((s) => s.id === seriesId)
-      target?.photos.forEach((p) => URL.revokeObjectURL(p.preview))
+      target?.photos.forEach((p) => p.preview && URL.revokeObjectURL(p.preview))
       return prev.filter((s) => s.id !== seriesId)
     })
-  }
-
-  async function addPhotos(seriesId: string, fileList: FileList | null) {
-    if (!fileList || fileList.length === 0) return
-    setBusy(true)
-    try {
-      const processed = await Promise.all(Array.from(fileList).map(toUploadable))
-      setSeries((prev) =>
-        prev.map((s) => {
-          if (s.id !== seriesId) return s
-          const room = MAX_PHOTOS - s.photos.length
-          const added = processed.slice(0, room).map((file) => ({
-            id: newId(),
-            file,
-            preview: URL.createObjectURL(file),
-          }))
-          return { ...s, photos: [...s.photos, ...added] }
-        })
-      )
-    } finally {
-      setBusy(false)
-    }
   }
 
   function removePhoto(seriesId: string, photoId: string) {
@@ -156,61 +169,38 @@ export default function Home() {
       prev.map((s) => {
         if (s.id !== seriesId) return s
         const target = s.photos.find((p) => p.id === photoId)
-        if (target) URL.revokeObjectURL(target.preview)
+        if (target?.preview) URL.revokeObjectURL(target.preview)
         return { ...s, photos: s.photos.filter((p) => p.id !== photoId) }
       })
     )
   }
 
-  const canSubmit =
+  const countsOk =
     series.length >= MIN_SERIES &&
     series.length <= MAX_SERIES &&
     series.every((s) => s.photos.length >= MIN_PHOTOS && s.photos.length <= MAX_PHOTOS)
+  const anyUploading = series.some((s) => s.photos.some((p) => p.uploading))
+  const anyFailed = series.some((s) => s.photos.some((p) => p.failed))
+  const canSubmit = countsOk && !anyUploading && !anyFailed
 
   async function handleSubmit() {
     if (!canSubmit) return
     setError(null)
     setSubmitting(true)
     try {
-      // Compress every photo to a small JPEG (parallel, capped).
-      const photos = series.flatMap((s) => s.photos)
-      const compressed = await mapLimit(photos, 4, async (photo) => {
-        try {
-          return await imageCompression(photo.file, COMPRESSION_OPTIONS)
-        } catch {
-          return photo.file
-        }
-      })
-
-      // Ask the server for upload slots (signed URLs) — no files in this call.
       const res = await fetch('/api/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           duration,
           name: name.trim() || undefined,
-          series: series.map((s) => s.photos.length),
+          series: series.map((s) => s.photos.map((p) => p.url)),
         }),
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) {
         throw new Error(data?.error || `Échec serveur (${res.status})`)
       }
-
-      // Upload each photo straight to Supabase Storage (bypasses the function
-      // body limit). `slots` is in the same order as the compressed photos.
-      const sb = getSupabaseBrowser()
-      const slots: { path: string; token: string }[] = data.slots
-      await mapLimit(slots, 4, async (slot, i) => {
-        const { error: upErr } = await sb.storage
-          .from('photos')
-          .uploadToSignedUrl(slot.path, slot.token, compressed[i], {
-            contentType: 'image/jpeg',
-            upsert: true,
-          })
-        if (upErr) throw new Error('L’envoi des photos a échoué. Réessaie.')
-      })
-
       setResultId(data.id)
       setResultsToken(data.resultsToken)
     } catch (err) {
@@ -368,26 +358,41 @@ export default function Home() {
                       className="h-full w-full rounded-xl object-cover"
                       style={{ imageOrientation: 'from-image' }}
                     />
-                    <button
-                      type="button"
-                      onClick={() => removePhoto(s.id, photo.id)}
-                      aria-label="Retirer la photo"
-                      className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs text-white backdrop-blur active:scale-90"
-                    >
-                      ✕
-                    </button>
+                    {photo.uploading && (
+                      <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/40">
+                        <Spinner />
+                      </div>
+                    )}
+                    {photo.failed && (
+                      <button
+                        type="button"
+                        onClick={() => retry(s.id, photo)}
+                        className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 rounded-xl bg-black/60 text-[11px] font-medium text-white"
+                      >
+                        <span className="text-base">⚠️</span>
+                        Réessayer
+                      </button>
+                    )}
+                    {!photo.uploading && (
+                      <button
+                        type="button"
+                        onClick={() => removePhoto(s.id, photo.id)}
+                        aria-label="Retirer la photo"
+                        className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs text-white backdrop-blur active:scale-90"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                 ))}
 
                 {s.photos.length < MAX_PHOTOS && (
-                  <label
-                    className={`flex aspect-square cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-zinc-300 text-zinc-400 transition active:scale-95 dark:border-zinc-700 ${busy ? 'pointer-events-none opacity-60' : ''}`}
-                  >
-                    {busy ? <Spinner /> : <PlusIcon />}
-                    <span className="text-[11px] font-medium">{busy ? 'Traitement…' : 'Ajouter'}</span>
+                  <label className="flex aspect-square cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-zinc-300 text-zinc-400 transition active:scale-95 dark:border-zinc-700">
+                    <PlusIcon />
+                    <span className="text-[11px] font-medium">Ajouter</span>
                     <input
                       type="file"
-                      accept="image/*,.heic,.heif"
+                      accept="image/*"
                       multiple
                       className="hidden"
                       onChange={(e) => {
@@ -442,15 +447,19 @@ export default function Home() {
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 14px)' }}
       >
         {error && <p className="mb-2 text-center text-sm text-red-600">{error}</p>}
-        {!canSubmit && !error && (
+        {!error && !canSubmit && (
           <p className="mb-2 text-center text-xs text-zinc-400">
-            Ajoute au moins {MIN_PHOTOS} photos par série.
+            {anyUploading
+              ? 'Envoi des photos…'
+              : anyFailed
+                ? 'Une photo n’a pas pu être envoyée — tape dessus pour réessayer.'
+                : `Ajoute au moins ${MIN_PHOTOS} photos par série.`}
           </p>
         )}
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={submitting || busy || !canSubmit}
+          disabled={submitting || !canSubmit}
           className="flex w-full items-center justify-center rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 py-4 text-base font-bold text-white shadow-lg shadow-fuchsia-500/25 transition active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
         >
           {submitting ? 'Création…' : 'Créer le test'}

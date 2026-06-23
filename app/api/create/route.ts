@@ -17,10 +17,9 @@ const MAX_SERIES = 5
 const MIN_PHOTOS = 2
 const MAX_PHOTOS = 5
 
-// The browser uploads each (already-compressed, JPEG) photo directly to
-// Supabase Storage using these signed URLs, so large uploads never hit the
-// Vercel function body limit. This route only validates the plan, hands back
-// upload slots, and records the test row.
+// Photos are already uploaded directly to Storage by the browser; this route
+// only validates the plan + the photo URLs (which must point at our public
+// bucket) and records the test row. Fast, and no file bytes pass through.
 export async function POST(request: Request) {
   let body: { duration?: unknown; name?: unknown; series?: unknown }
   try {
@@ -38,48 +37,33 @@ export async function POST(request: Request) {
   const creatorName =
     (typeof body.name === 'string' ? body.name.trim().slice(0, 40) : '') || null
 
-  const counts = body.series
-  if (!Array.isArray(counts) || counts.length < 1 || counts.length > MAX_SERIES) {
+  const seriesUrls = body.series
+  if (!Array.isArray(seriesUrls) || seriesUrls.length < 1 || seriesUrls.length > MAX_SERIES) {
     return Response.json({ error: 'Un test doit avoir 1 à 5 séries.' }, { status: 400 })
   }
-  for (const c of counts) {
-    if (!Number.isInteger(c) || c < MIN_PHOTOS || c > MAX_PHOTOS) {
+
+  const publicPrefix = `${process.env.SUPABASE_URL ?? ''}/storage/v1/object/public/${PHOTOS_BUCKET}/`
+
+  const series: { id: string; images: string[] }[] = []
+  for (const urls of seriesUrls) {
+    if (!Array.isArray(urls) || urls.length < MIN_PHOTOS || urls.length > MAX_PHOTOS) {
       return Response.json(
         { error: 'Chaque série doit contenir 2 à 5 photos.' },
         { status: 400 }
       )
     }
+    for (const u of urls) {
+      if (typeof u !== 'string' || u.length > 500 || !u.startsWith(publicPrefix)) {
+        return Response.json({ error: 'Photo invalide.' }, { status: 400 })
+      }
+    }
+    series.push({ id: nanoid(), images: urls as string[] })
   }
 
   try {
     const supabase = getSupabaseAdmin()
     const testId = nanoid()
     const resultsToken = nanoid()
-
-    const slots: { path: string; token: string }[] = []
-    const series: { id: string; images: string[] }[] = []
-
-    for (const count of counts as number[]) {
-      const seriesId = nanoid()
-      const images: string[] = []
-      for (let i = 0; i < count; i++) {
-        const path = `${testId}/${seriesId}/${i}.jpg`
-        const { data: signed, error } = await supabase.storage
-          .from(PHOTOS_BUCKET)
-          .createSignedUploadUrl(path)
-        if (error || !signed) {
-          console.error('[api/create] sign failed:', error)
-          return Response.json(
-            { error: 'Préparation de l’envoi impossible. Réessaie.' },
-            { status: 500 }
-          )
-        }
-        slots.push({ path, token: signed.token })
-        images.push(supabase.storage.from(PHOTOS_BUCKET).getPublicUrl(path).data.publicUrl)
-      }
-      series.push({ id: seriesId, images })
-    }
-
     const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
     const baseRow = { id: testId, series, expires_at: expiresAt, results_token: resultsToken }
 
@@ -98,7 +82,7 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Impossible de créer le test. Réessaie.' }, { status: 500 })
     }
 
-    return Response.json({ id: testId, resultsToken, slots })
+    return Response.json({ id: testId, resultsToken })
   } catch (err) {
     console.error('[api/create] failed:', err)
     return Response.json({ error: 'Une erreur est survenue. Réessaie.' }, { status: 500 })
