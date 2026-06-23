@@ -191,7 +191,7 @@ export default function Home() {
       const res = await fetch('/api/create', { method: 'POST', body: formData })
       const data = await res.json().catch(() => null)
       if (!res.ok) {
-        throw new Error(data?.error || 'Impossible de créer le test. Réessaie.')
+        throw new Error(data?.error || `Échec serveur (${res.status})`)
       }
       setResultId(data.id)
       setResultsToken(data.resultsToken)
