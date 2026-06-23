@@ -4,6 +4,7 @@ import imageCompression from 'browser-image-compression'
 import { useState } from 'react'
 
 import { Wordmark } from '@/app/_components/wordmark'
+import { getSupabaseBrowser } from '@/lib/supabase-browser'
 
 type Photo = { id: string; file: File; preview: string }
 type Series = { id: string; photos: Photo[] }
@@ -19,6 +20,7 @@ const MIN_PHOTOS = 2
 const COMPRESSION_OPTIONS = {
   maxWidthOrHeight: 1080,
   maxSizeMB: 0.4,
+  fileType: 'image/jpeg',
   // Run on the main thread: the web-worker path imports the library from a
   // CDN at runtime, which fails (e.g. Safari throws "The string did not match
   // the expected pattern.") when that request is blocked or offline.
@@ -170,29 +172,45 @@ export default function Home() {
     setError(null)
     setSubmitting(true)
     try {
-      const formData = new FormData()
-      formData.append('duration', duration)
-      if (name.trim()) formData.append('name', name.trim())
-      formData.append('seriesOrder', JSON.stringify(series.map((s) => s.id)))
-
-      // Compress photos in parallel (capped) instead of one-by-one.
-      const items = series.flatMap((s) => s.photos.map((photo) => ({ seriesId: s.id, photo })))
-      const compressed = await mapLimit(items, 4, async ({ photo }) => {
+      // Compress every photo to a small JPEG (parallel, capped).
+      const photos = series.flatMap((s) => s.photos)
+      const compressed = await mapLimit(photos, 4, async (photo) => {
         try {
           return await imageCompression(photo.file, COMPRESSION_OPTIONS)
         } catch {
           return photo.file
         }
       })
-      items.forEach((it, i) => {
-        formData.append(`series_${it.seriesId}`, compressed[i], it.photo.file.name)
-      })
 
-      const res = await fetch('/api/create', { method: 'POST', body: formData })
+      // Ask the server for upload slots (signed URLs) — no files in this call.
+      const res = await fetch('/api/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          duration,
+          name: name.trim() || undefined,
+          series: series.map((s) => s.photos.length),
+        }),
+      })
       const data = await res.json().catch(() => null)
       if (!res.ok) {
         throw new Error(data?.error || `Échec serveur (${res.status})`)
       }
+
+      // Upload each photo straight to Supabase Storage (bypasses the function
+      // body limit). `slots` is in the same order as the compressed photos.
+      const sb = getSupabaseBrowser()
+      const slots: { path: string; token: string }[] = data.slots
+      await mapLimit(slots, 4, async (slot, i) => {
+        const { error: upErr } = await sb.storage
+          .from('photos')
+          .uploadToSignedUrl(slot.path, slot.token, compressed[i], {
+            contentType: 'image/jpeg',
+            upsert: true,
+          })
+        if (upErr) throw new Error('L’envoi des photos a échoué. Réessaie.')
+      })
+
       setResultId(data.id)
       setResultsToken(data.resultsToken)
     } catch (err) {
