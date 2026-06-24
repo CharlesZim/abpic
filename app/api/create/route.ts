@@ -42,7 +42,25 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Un test doit avoir 1 à 5 séries.' }, { status: 400 })
   }
 
-  const publicPrefix = `${process.env.SUPABASE_URL ?? ''}/storage/v1/object/public/${PHOTOS_BUCKET}/`
+  // A photo URL is valid only if it's a public URL on our Supabase host for
+  // the photos bucket. Parsed via URL so a trailing slash / formatting in
+  // SUPABASE_URL can't cause false rejections.
+  let supaHost = ''
+  try {
+    supaHost = new URL(process.env.SUPABASE_URL ?? '').host
+  } catch {
+    // leave empty -> nothing validates -> will reject below
+  }
+  const bucketPath = `/storage/v1/object/public/${PHOTOS_BUCKET}/`
+  const isOurStorageUrl = (u: unknown): boolean => {
+    if (typeof u !== 'string' || u.length > 500) return false
+    try {
+      const url = new URL(u)
+      return url.host === supaHost && url.pathname.startsWith(bucketPath)
+    } catch {
+      return false
+    }
+  }
 
   const series: { id: string; images: string[] }[] = []
   for (const urls of seriesUrls) {
@@ -53,7 +71,7 @@ export async function POST(request: Request) {
       )
     }
     for (const u of urls) {
-      if (typeof u !== 'string' || u.length > 500 || !u.startsWith(publicPrefix)) {
+      if (!isOurStorageUrl(u)) {
         return Response.json({ error: 'Photo invalide.' }, { status: 400 })
       }
     }
