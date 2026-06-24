@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 
 import { Wordmark } from '@/app/_components/wordmark'
@@ -290,7 +291,7 @@ export default function Voter({
   if (index >= series.length) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-5 bg-zinc-950 px-6 text-center text-white">
-        <Wordmark className="absolute top-5 text-lg" />
+        <Wordmark href="/" className="absolute top-5 text-lg" />
         <div className="relative flex h-24 w-24 items-center justify-center">
           <span className="absolute inline-flex h-full w-full rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600 opacity-60 motion-safe:animate-ping" />
           <span className="relative flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600">
@@ -315,20 +316,26 @@ export default function Voter({
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col px-5 sm:max-w-2xl">
         <header className="space-y-3 pb-2 pt-5">
           <div className="flex items-center justify-between">
-            <Wordmark className="text-lg" />
-            {series.length > 1 && (
-              <span className="text-xs font-medium text-white/40">
-                {index + 1} / {series.length}
-              </span>
-            )}
+            <Wordmark href="/" className="text-lg" />
+            <Link
+              href="/"
+              className="rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 px-3.5 py-1.5 text-xs font-bold text-white shadow shadow-fuchsia-500/20 active:scale-95"
+            >
+              Fais le tien
+            </Link>
           </div>
           {series.length > 1 && (
-            <div className="flex gap-1.5">
-              {series.map((s, i) => (
-                <div key={s.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/15">
-                  <div className={`h-full rounded-full bg-white transition-all duration-300 ${i <= index ? 'w-full' : 'w-0'}`} />
-                </div>
-              ))}
+            <div className="flex items-center gap-2">
+              <div className="flex flex-1 gap-1.5">
+                {series.map((s, i) => (
+                  <div key={s.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/15">
+                    <div className={`h-full rounded-full bg-white transition-all duration-300 ${i <= index ? 'w-full' : 'w-0'}`} />
+                  </div>
+                ))}
+              </div>
+              <span className="text-xs font-medium text-white/40">
+                {index + 1}/{series.length}
+              </span>
             </div>
           )}
           <p className="text-sm text-white/60">{context}</p>

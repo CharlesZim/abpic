@@ -1,3 +1,5 @@
+import Link from 'next/link'
+
 import { Wordmark } from '@/app/_components/wordmark'
 import { getSupabaseAdmin } from '@/lib/supabase'
 
@@ -13,7 +15,7 @@ function isExpired(expiresAt: string): boolean {
 function NotFound() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-950 px-6 text-center text-white">
-      <Wordmark className="absolute top-5 text-lg" />
+      <Wordmark href="/" className="absolute top-5 text-lg" />
       <h1 className="text-2xl font-bold">Résultats introuvables</h1>
       <p className="text-sm text-zinc-400">Ce lien de résultats n’est pas valide.</p>
     </main>
@@ -61,7 +63,15 @@ export default async function ResultsPage({
     <main className="min-h-screen bg-zinc-950 text-white">
       <div className="mx-auto w-full max-w-md px-5 py-6 sm:max-w-2xl">
         <header className="mb-6 space-y-3">
-          <Wordmark className="text-lg" />
+          <div className="flex items-center justify-between">
+            <Wordmark href="/" className="text-lg" />
+            <Link
+              href="/"
+              className="rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 px-3.5 py-1.5 text-xs font-bold text-white shadow shadow-fuchsia-500/20 active:scale-95"
+            >
+              Nouveau test
+            </Link>
+          </div>
           <div>
             <h1 className="text-3xl font-extrabold tracking-tight">Résultats</h1>
             <p className="mt-1 text-sm text-zinc-400">

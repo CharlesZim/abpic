@@ -27,7 +27,7 @@ function isExpired(expiresAt: string): boolean {
 function Expired() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-950 px-6 text-center text-white">
-      <Wordmark className="absolute top-5 text-lg" />
+      <Wordmark href="/" className="absolute top-5 text-lg" />
       <div className="text-4xl">⌛️</div>
       <h1 className="text-2xl font-bold">Ce test a expiré</h1>
       <p className="text-sm text-zinc-400">Le vote n’est plus disponible pour ce lien.</p>
