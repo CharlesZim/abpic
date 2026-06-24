@@ -177,9 +177,7 @@ export default function Home() {
     const files = Array.from(fileList)
     const supported = files.filter(isSupportedImage)
     if (supported.length < files.length) {
-      setError(
-        'Format non supporté (RAW/ProRAW) ou photo trop lourde. Choisis une photo normale, ou désactive ProRAW (Réglages › Appareil photo › Formats).'
-      )
+      setError('Format non supporté (RAW/ProRAW). Choisis une autre photo.')
     } else {
       setError(null)
     }
