@@ -299,6 +299,13 @@ export default function Voter({
           </span>
         </div>
         <h1 className="text-3xl font-extrabold tracking-tight">Merci, c’est voté !</h1>
+        <p className="text-sm text-white/55">Toi aussi, demande à tes amis 👇</p>
+        <Link
+          href="/"
+          className="mt-1 flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 px-7 py-4 text-base font-bold text-white shadow-lg shadow-fuchsia-500/25 transition active:scale-[0.98]"
+        >
+          Fais le tien
+        </Link>
         {error && <p className="text-sm text-red-400">{error}</p>}
       </main>
     )
