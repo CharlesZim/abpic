@@ -10,11 +10,17 @@ export type Series = { id: string; images: string[] }
 const VOTER_STORAGE_KEY = 'abpic_voter_id'
 
 function getVoterId(): string {
-  const existing = sessionStorage.getItem(VOTER_STORAGE_KEY)
-  if (existing) return existing
-  const id = crypto.randomUUID()
-  sessionStorage.setItem(VOTER_STORAGE_KEY, id)
-  return id
+  // localStorage persists across tabs/reopens (unlike sessionStorage), so the
+  // same browser keeps one identity -> one vote per series.
+  try {
+    const existing = localStorage.getItem(VOTER_STORAGE_KEY)
+    if (existing) return existing
+    const id = crypto.randomUUID()
+    localStorage.setItem(VOTER_STORAGE_KEY, id)
+    return id
+  } catch {
+    return crypto.randomUUID()
+  }
 }
 
 function buzz(ms: number) {
