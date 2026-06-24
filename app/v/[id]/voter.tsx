@@ -268,7 +268,8 @@ export default function Voter({
     buzz(8)
     setSelections((prev) => {
       const next = [...prev]
-      next[index] = imageIndex
+      // Tapping the selected photo again deselects it.
+      next[index] = next[index] === imageIndex ? null : imageIndex
       return next
     })
   }
@@ -306,8 +307,8 @@ export default function Voter({
   const selected = selections[index]
   const gridCols = current.images.length === 2 ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'
   const context = creatorName
-    ? `Aide ${creatorName} à choisir la photo à poster — tape ta préférée.`
-    : 'Aide à choisir la photo à poster — tape ta préférée.'
+    ? `${creatorName} poste laquelle ? Tape ta préférée 👇`
+    : 'Tu choisis laquelle ? Tape ta préférée 👇'
 
   return (
     <main className="flex min-h-screen flex-col bg-zinc-950 text-white">
