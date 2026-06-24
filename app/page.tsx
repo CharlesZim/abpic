@@ -24,6 +24,26 @@ const MIN_SERIES = 1
 const MAX_PHOTOS = 5
 const MIN_PHOTOS = 2
 
+// Formats the browser can actually decode + display. RAW/ProRAW (DNG, TIFF…)
+// can't be shown or compressed client-side, so we reject them. Empty type is
+// allowed because iOS sometimes omits it for HEIC.
+const ACCEPTED_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/heic',
+  'image/heif',
+])
+const MAX_FILE_BYTES = 25 * 1024 * 1024 // backstop that also catches huge RAW files
+
+function isSupportedImage(file: File): boolean {
+  const type = (file.type || '').toLowerCase()
+  if (file.size > MAX_FILE_BYTES) return false
+  return type === '' || ACCEPTED_TYPES.has(type)
+}
+
 const COMPRESSION_OPTIONS = {
   maxWidthOrHeight: 1080,
   maxSizeMB: 0.4,
@@ -98,7 +118,6 @@ export default function Home() {
   const [resultId, setResultId] = useState<string | null>(null)
   const [resultsToken, setResultsToken] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
-  const [diag, setDiag] = useState<string | null>(null)
   // In-flight upload per photo id, so "Créer" can await background uploads.
   const uploads = useRef(new Map<string, Promise<string | null>>())
 
@@ -114,10 +133,8 @@ export default function Home() {
   // null on failure. Never hangs (each step is time-boxed).
   async function uploadOne(seriesId: string, photo: Photo): Promise<string | null> {
     let blob: Blob = photo.file
-    let compressed = false
     try {
       blob = await withTimeout(imageCompression(photo.file, COMPRESSION_OPTIONS), 20000)
-      compressed = true
     } catch {
       blob = photo.file
     }
@@ -138,12 +155,10 @@ export default function Home() {
           .uploadToSignedUrl(d.path, d.token, blob, { contentType: 'image/jpeg', upsert: true }),
         30000
       )
-      if (upErr) throw new Error(`upload: ${upErr.message}`)
+      if (upErr) throw upErr
       updatePhoto(seriesId, photo.id, (p) => ({ ...p, url: d.publicUrl, uploading: false, failed: false }))
       return d.publicUrl
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'inconnu'
-      setDiag(`${compressed ? 'jpeg' : 'brut'} · ${blob.type || '?'} · ${Math.round(blob.size / 1024)}Ko · ${msg}`)
+    } catch {
       updatePhoto(seriesId, photo.id, (p) => ({ ...p, uploading: false, failed: true }))
       return null
     }
@@ -159,7 +174,18 @@ export default function Home() {
     const room = current ? MAX_PHOTOS - current.photos.length : 0
     if (room <= 0) return
 
-    const adding: Photo[] = Array.from(fileList)
+    const files = Array.from(fileList)
+    const supported = files.filter(isSupportedImage)
+    if (supported.length < files.length) {
+      setError(
+        'Format non supporté (RAW/ProRAW) ou photo trop lourde. Choisis une photo normale, ou désactive ProRAW (Réglages › Appareil photo › Formats).'
+      )
+    } else {
+      setError(null)
+    }
+    if (supported.length === 0) return
+
+    const adding: Photo[] = supported
       .slice(0, room)
       .map((file) => ({
         id: newId(),
@@ -492,7 +518,6 @@ export default function Home() {
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 14px)' }}
       >
         {error && <p className="mb-2 text-center text-sm text-red-600">{error}</p>}
-        {diag && <p className="mb-2 break-all text-center text-[11px] text-amber-600">diag: {diag}</p>}
         {!error && !canSubmit && (
           <p className="mb-2 text-center text-xs text-zinc-400">
             Ajoute au moins {MIN_PHOTOS} photos par série.
