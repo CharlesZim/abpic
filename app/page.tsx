@@ -98,6 +98,7 @@ export default function Home() {
   const [resultId, setResultId] = useState<string | null>(null)
   const [resultsToken, setResultsToken] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [diag, setDiag] = useState<string | null>(null)
   // In-flight upload per photo id, so "Créer" can await background uploads.
   const uploads = useRef(new Map<string, Promise<string | null>>())
 
@@ -113,8 +114,10 @@ export default function Home() {
   // null on failure. Never hangs (each step is time-boxed).
   async function uploadOne(seriesId: string, photo: Photo): Promise<string | null> {
     let blob: Blob = photo.file
+    let compressed = false
     try {
       blob = await withTimeout(imageCompression(photo.file, COMPRESSION_OPTIONS), 20000)
+      compressed = true
     } catch {
       blob = photo.file
     }
@@ -127,7 +130,7 @@ export default function Home() {
     try {
       const r = await withTimeout(fetch('/api/sign-upload', { method: 'POST' }), 15000)
       const d = await r.json().catch(() => null)
-      if (!r.ok || !d) throw new Error()
+      if (!r.ok || !d) throw new Error(`sign ${r.status} ${d?.error ?? ''}`)
       const sb = getSupabaseBrowser()
       const { error: upErr } = await withTimeout(
         sb.storage
@@ -135,10 +138,12 @@ export default function Home() {
           .uploadToSignedUrl(d.path, d.token, blob, { contentType: 'image/jpeg', upsert: true }),
         30000
       )
-      if (upErr) throw upErr
+      if (upErr) throw new Error(`upload: ${upErr.message}`)
       updatePhoto(seriesId, photo.id, (p) => ({ ...p, url: d.publicUrl, uploading: false, failed: false }))
       return d.publicUrl
-    } catch {
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'inconnu'
+      setDiag(`${compressed ? 'jpeg' : 'brut'} · ${blob.type || '?'} · ${Math.round(blob.size / 1024)}Ko · ${msg}`)
       updatePhoto(seriesId, photo.id, (p) => ({ ...p, uploading: false, failed: true }))
       return null
     }
@@ -487,6 +492,7 @@ export default function Home() {
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 14px)' }}
       >
         {error && <p className="mb-2 text-center text-sm text-red-600">{error}</p>}
+        {diag && <p className="mb-2 break-all text-center text-[11px] text-amber-600">diag: {diag}</p>}
         {!error && !canSubmit && (
           <p className="mb-2 text-center text-xs text-zinc-400">
             Ajoute au moins {MIN_PHOTOS} photos par série.
