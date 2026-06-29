@@ -286,8 +286,8 @@ export default function Voter({
     : 'Tu choisis laquelle ? Tape ta préférée 👇'
 
   return (
-    <main className="flex min-h-screen flex-col bg-zinc-950 text-white">
-      <div className="mx-auto flex w-full max-w-md flex-1 flex-col px-5 sm:max-w-2xl">
+    <main className="flex h-dvh flex-col overflow-hidden bg-zinc-950 text-white">
+      <div className="mx-auto flex w-full max-w-md flex-1 flex-col overflow-hidden px-5 sm:max-w-2xl">
         <header className="space-y-3 pb-3 pt-5">
           <div className="flex items-center justify-between">
             <Wordmark href="/" className="text-lg" />
