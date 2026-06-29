@@ -45,11 +45,13 @@ function ChevronLeftIcon() {
   )
 }
 
-function MagnifierIcon() {
+function ExpandIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="11" cy="11" r="7" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="15 3 21 3 21 9" />
+      <polyline points="9 21 3 21 3 15" />
+      <line x1="21" y1="3" x2="14" y2="10" />
+      <line x1="3" y1="21" x2="10" y2="14" />
     </svg>
   )
 }
@@ -169,21 +171,9 @@ function ZoomModal({ src, onClose }: { src: string; onClose: () => void }) {
   )
 }
 
-/* ---------- one comparable photo ---------- */
+/* ---------- big focused photo (tap to zoom) ---------- */
 
-function PhotoCard({
-  src,
-  index,
-  selected,
-  onSelect,
-  onZoom,
-}: {
-  src: string
-  index: number
-  selected: boolean
-  onSelect: () => void
-  onZoom: () => void
-}) {
+function MainPhoto({ src, onZoom }: { src: string; onZoom: () => void }) {
   const [loaded, setLoaded] = useState(false)
   const imgRef = useRef<HTMLImageElement>(null)
 
@@ -192,43 +182,26 @@ function PhotoCard({
   }, [src])
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={onSelect}
-        aria-pressed={selected}
-        className={`block w-full overflow-hidden rounded-2xl border-2 transition ${
-          selected ? 'border-fuchsia-500 ring-2 ring-fuchsia-500/30' : 'border-white/10'
-        }`}
-      >
-        <div className="relative aspect-[3/4] bg-zinc-900">
-          {!loaded && <div className="absolute inset-0 animate-pulse bg-white/5" />}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            ref={imgRef}
-            src={src}
-            alt={`Photo ${index + 1}`}
-            onLoad={() => setLoaded(true)}
-            className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
-            style={{ imageOrientation: 'from-image' }}
-          />
-          {selected && (
-            <span className="absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600 text-white shadow-lg">
-              <CheckIcon />
-            </span>
-          )}
-        </div>
-      </button>
-
-      <button
-        type="button"
-        onClick={onZoom}
-        aria-label="Agrandir la photo"
-        className="absolute left-2.5 top-2.5 rounded-full bg-black/50 p-2 text-white backdrop-blur active:scale-90"
-      >
-        <MagnifierIcon />
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={onZoom}
+      className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-3xl bg-zinc-900"
+    >
+      {!loaded && <div className="absolute inset-8 animate-pulse rounded-2xl bg-white/10" />}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        ref={imgRef}
+        src={src}
+        alt="Photo"
+        draggable={false}
+        onLoad={() => setLoaded(true)}
+        className={`max-h-full max-w-full object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+        style={{ imageOrientation: 'from-image' }}
+      />
+      <span className="pointer-events-none absolute bottom-3 right-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/45 text-white/90 backdrop-blur">
+        <ExpandIcon />
+      </span>
+    </button>
   )
 }
 
@@ -244,7 +217,7 @@ export default function Voter({
   creatorName: string | null
 }) {
   const [index, setIndex] = useState(0)
-  const [selections, setSelections] = useState<(number | null)[]>(() => series.map(() => null))
+  const [current, setCurrent] = useState(0)
   const [zoomSrc, setZoomSrc] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -271,26 +244,16 @@ export default function Voter({
     }
   }
 
-  function select(imageIndex: number) {
-    buzz(8)
-    setSelections((prev) => {
-      const next = [...prev]
-      // Tapping the selected photo again deselects it.
-      next[index] = next[index] === imageIndex ? null : imageIndex
-      return next
-    })
-  }
-
-  function valider() {
-    const choice = selections[index]
-    if (choice === null) return
+  function choose() {
     buzz(18)
-    sendVote(series[index].id, choice)
+    sendVote(series[index].id, current)
+    setCurrent(0)
     setIndex((i) => i + 1)
   }
 
   function back() {
     buzz(8)
+    setCurrent(0)
     setIndex((i) => Math.max(0, i - 1))
   }
 
@@ -317,9 +280,7 @@ export default function Voter({
     )
   }
 
-  const current = series[index]
-  const selected = selections[index]
-  const gridCols = current.images.length === 2 ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'
+  const serie = series[index]
   const context = creatorName
     ? `${creatorName} poste laquelle ? Tape ta préférée 👇`
     : 'Tu choisis laquelle ? Tape ta préférée 👇'
@@ -327,7 +288,7 @@ export default function Voter({
   return (
     <main className="flex min-h-screen flex-col bg-zinc-950 text-white">
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col px-5 sm:max-w-2xl">
-        <header className="space-y-3 pb-2 pt-5">
+        <header className="space-y-3 pb-3 pt-5">
           <div className="flex items-center justify-between">
             <Wordmark href="/" className="text-lg" />
             <Link
@@ -354,19 +315,35 @@ export default function Voter({
           <p className="text-sm text-white/60">{context}</p>
         </header>
 
-        <div className="flex flex-1 items-start py-4">
-          <div className={`grid w-full gap-3 sm:gap-4 ${gridCols}`}>
-            {current.images.map((src, imageIndex) => (
-              <PhotoCard
-                key={imageIndex}
+        {/* big focused photo */}
+        <div className="relative min-h-0 flex-1">
+          <MainPhoto key={`${index}:${current}`} src={serie.images[current]} onZoom={() => setZoomSrc(serie.images[current])} />
+        </div>
+
+        {/* thumbnail strip */}
+        <div className="flex justify-center gap-2 overflow-x-auto py-3">
+          {serie.images.map((src, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setCurrent(i)}
+              aria-label={`Photo ${i + 1}`}
+              className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 transition ${
+                i === current ? 'border-fuchsia-500' : 'border-white/10 opacity-70'
+              }`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
                 src={src}
-                index={imageIndex}
-                selected={selected === imageIndex}
-                onSelect={() => select(imageIndex)}
-                onZoom={() => setZoomSrc(src)}
+                alt=""
+                className="h-full w-full object-cover"
+                style={{ imageOrientation: 'from-image' }}
               />
-            ))}
-          </div>
+              <span className="absolute left-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-black/55 px-1 text-[10px] font-bold">
+                {i + 1}
+              </span>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -389,15 +366,10 @@ export default function Voter({
             )}
             <button
               type="button"
-              onClick={valider}
-              disabled={selected === null}
-              className="flex flex-1 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 py-4 text-base font-bold text-white shadow-lg shadow-fuchsia-500/25 transition active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
+              onClick={choose}
+              className="flex flex-1 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-600 py-4 text-base font-bold text-white shadow-lg shadow-fuchsia-500/25 transition active:scale-[0.98]"
             >
-              {selected === null
-                ? 'Choisis ta préférée'
-                : index === series.length - 1
-                  ? 'Valider'
-                  : 'Suivant'}
+              Choisir la photo {current + 1}
             </button>
           </div>
         </div>
